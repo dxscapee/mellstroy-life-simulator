@@ -21,12 +21,16 @@ interface CardRefs {
 }
 
 /**
- * Шторка объектов по группам-вкладкам. DOM строится один раз из data/objects.ts,
+ * Выноска объектов по группам-вкладкам. DOM строится один раз из data/objects.ts,
  * дальше обновляются только динамические части.
  *
  * Схема карточки (по ТЗ): [иконка + имя] [прогресс-бар до эволюции] [кнопка].
  * Каждые tiers.levelsPerTier покупок объект ЭВОЛЮЦИОНИРУЕТ: новая моделька на
  * сцене и название стадии. Прогресс-бар показывает путь до следующей эволюции.
+ *
+ * Окно — отдельная выноска над таб-баром (НЕ его продолжение), по центру,
+ * фиксированной ширины (не растягивается на широких экранах).
+ * Повторный клик по активной вкладке закрывает выноску (toggle).
  *
  * Состояния карточки:
  *  - locked:   гейт `requires` не пройден — кнопка 🔒, условие в подписи бара;
@@ -173,27 +177,34 @@ export class ObjectSheet {
     return card;
   }
 
+  /** Подсвечивается только вкладка ОТКРЫТОЙ выноски (закрыто — нет активных). */
   private updateTabActiveState(): void {
+    const active = this.openState ? this.activeGroup : null;
     for (const el of this.uiRoot.querySelectorAll<HTMLButtonElement>('.tab-btn')) {
-      el.classList.toggle('active', el.dataset.group === this.activeGroup);
+      el.classList.toggle('active', el.dataset.group === active);
     }
   }
 
   // ---------------------------------------------------------------- public
 
   showGroup(group: ObjectGroup): void {
-    const wasOpen = this.openState;
+    // Повторный клик по активной вкладке закрывает выноску (toggle).
+    if (this.openState && this.activeGroup === group) {
+      this.close();
+      return;
+    }
     if (this.activeGroup !== group) {
       this.activeGroup = group;
       this.rebuildCards();
     }
-    if (!wasOpen) this.open();
+    if (!this.openState) this.open();
   }
 
   open(): void {
     this.openState = true;
     this.refresh(); // мгновенная синхронизация цен после простоя
     this.root.classList.add('open');
+    this.updateTabActiveState();
   }
 
   isOpen(): boolean {
@@ -203,6 +214,7 @@ export class ObjectSheet {
   close(): void {
     this.openState = false;
     this.root.classList.remove('open');
+    this.updateTabActiveState();
   }
 
   toggle(): void {

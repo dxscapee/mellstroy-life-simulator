@@ -1,7 +1,8 @@
 import Decimal from 'break_infinity.js';
 import { gameConfig } from '@data/gameConfig';
 import { objectById, objectDefs } from '@data/objects';
-import type { GameStateSnapshot, ObjectDef, OfflineEarnings } from './types';
+import { events } from './eventBus';
+import type { GameStateSnapshot, ObjectDef, OfflineEarnings, SubscriberState } from './types';
 
 /**
  * Чистая модель данных игры. Никакого DOM, никакой графики.
@@ -21,14 +22,23 @@ export class GameState {
   totalEarned: Decimal;
   tapsCount: number;
 
+  /** Мета-прогресс подписчиков (см. gameConfig.subscribers). */
+  subscribers: SubscriberState;
+
   /** Кэш активного потока (доход за тап): пересобирается после изменения уровней. */
   private cachedMoneyPerTap: Decimal | null = null;
+  /**
+   * Форс дохода за тап (dev-инструменты/баланс-тесты). Не null — формула весов
+   * игнорируется, тап всегда даёт это значение. Сбрасывается в resetProgress.
+   */
+  private tapOverride: Decimal | null = null;
 
   constructor() {
     this.money = gameConfig.startingMoney.add(0);
     this.passiveIncomePerSecond = new Decimal(0);
     this.totalEarned = new Decimal(0);
     this.tapsCount = 0;
+    this.subscribers = { count: 0, progress: 0, claimed: 0, claimable: false, goal: 0 };
   }
 
   // -------------------------------------------------------------- objects
@@ -87,8 +97,20 @@ export class GameState {
     return Math.pow(perTier, tier);
   }
 
+  /** Форсировать доход за тап (dev-инструменты/баланс-тесты). null = обычная формула. */
+  setTapOverride(value: Decimal | null): void {
+    this.tapOverride = value;
+    this.invalidateCaches(); // цель/награда подписчиков зависят от тапа
+  }
+
+  /** Активен ли форс тапа (для dev-UI). */
+  isTapOverridden(): boolean {
+    return this.tapOverride !== null;
+  }
+
   /** Доход за один тап (активный поток). Кэш — Decimal-операции аллоцируют. */
   getMoneyPerTap(): Decimal {
+    if (this.tapOverride) return this.tapOverride;
     let cached = this.cachedMoneyPerTap;
     if (!cached) {
       let sum = 0;
@@ -129,6 +151,81 @@ export class GameState {
     this.recalculatePassiveIncome();
   }
 
+  // ----------------------------------------------------------- subscribers
+
+  /**
+   * Цель ТЕКУЩЕГО цикла подписчиков. Ленивая инициализация: при первом обращении
+   * фиксируется от текущего дохода за клик (goalMult × тап) и больше не меняется,
+   * пока цикл не завершится клеймом. Рост тапа в середине цикла цель не двигает.
+   */
+  getSubscriberGoal(): number {
+    const s = this.subscribers;
+    if (s.goal <= 0) {
+      s.goal = Math.max(1, Math.round(this.getMoneyPerTap().toNumber() * gameConfig.subscribers.goalMult));
+    }
+    return s.goal;
+  }
+
+  /**
+   * Награда за заполненную шкалу = rewardMult × (доход за клик НА МОМЕНТ клейма).
+   * Не кэшируется: вычисляется в момент выдачи (нужна один раз за цикл).
+   */
+  getSubscriberReward(): Decimal {
+    return this.getMoneyPerTap().mul(gameConfig.subscribers.rewardMult);
+  }
+
+  /**
+   * Пассивный прирост подписчиков: раз в addIntervalSec капает сумма,
+   * равная пассивному доходу за интервал. Копится дробная часть — не теряется.
+   */
+  addSubscribersFromPassive(dt: number): void {
+    if (this.passiveIncomePerSecond.lte(0)) return;
+    const gain = this.passiveIncomePerSecond.toNumber() * dt;
+    if (gain <= 0) return;
+    this.bumpSubscribers(gain);
+  }
+
+  /** Бонус за клики: каждый N-й клик даёт подписчиков = доход за этот клик. */
+  addSubscribersFromTap(tapAmount: Decimal): void {
+    if (this.tapsCount % gameConfig.subscribers.clickBonusEvery !== 0) return;
+    this.bumpSubscribers(tapAmount.toNumber());
+  }
+
+  private bumpSubscribers(gain: number): void {
+    if (!Number.isFinite(gain) || gain <= 0) return;
+
+    const s = this.subscribers;
+    s.count += gain;
+
+    if (!s.claimable) {
+      s.progress += gain;
+      if (s.progress >= this.getSubscriberGoal()) {
+        s.progress = this.getSubscriberGoal();
+        s.claimable = true;
+      }
+    }
+    // Пока claimable — прирост копится в count, но не в progress: шкала ждёт клика.
+  }
+
+  /**
+   * Забрать награду за заполненную шкалу. Возвращает сумму или null.
+   * Следующая цель = старая + goalMult × (тап на момент клейма) — цели растут
+   * накопленно, каждый цикл чуть длиннее предыдущего.
+   */
+  claimSubscribers(): Decimal | null {
+    const s = this.subscribers;
+    if (!s.claimable) return null;
+
+    const reward = this.getSubscriberReward();
+    this.addMoney(reward);
+    s.claimed += 1;
+    s.claimable = false;
+    s.progress = 0;
+    // Новая цель фиксируется ТОТЧАС от текущего тапа: старое число + новая порция.
+    s.goal = s.goal + Math.round(this.getMoneyPerTap().toNumber() * gameConfig.subscribers.goalMult);
+    return reward;
+  }
+
   // ----------------------------------------------------------------- tap
 
   applyTap(): Decimal {
@@ -153,8 +250,11 @@ export class GameState {
     this.money = gameConfig.startingMoney.add(0);
     this.totalEarned = new Decimal(0);
     this.tapsCount = 0;
+    this.tapOverride = null; // свежий старт = без форсов
+    this.subscribers = { count: 0, progress: 0, claimed: 0, claimable: false, goal: 0 };
     for (const o of objectDefs) o.currentLevel = o.startLevel;
     this.invalidateCaches();
+    events.emit('objects:changed', undefined); // сцена должна скрыть проданное
   }
 
   toSnapshot(): GameStateSnapshot {
@@ -169,6 +269,7 @@ export class GameState {
       totalEarned: this.totalEarned.toString(),
       tapsCount: this.tapsCount,
       objects,
+      subscribers: { ...this.subscribers },
       savedAt: Date.now(),
     };
   }
@@ -177,6 +278,16 @@ export class GameState {
     this.money = new Decimal(snap.money ?? '0');
     this.totalEarned = new Decimal(snap.totalEarned ?? '0');
     this.tapsCount = snap.tapsCount ?? 0;
+
+    const sub = snap.subscribers;
+    this.subscribers = {
+      count: Number.isFinite(sub?.count) ? sub!.count : 0,
+      progress: Number.isFinite(sub?.progress) ? sub!.progress : 0,
+      claimed: Number.isFinite(sub?.claimed) ? sub!.claimed : 0,
+      claimable: sub?.claimable === true,
+      // 0 = старый сейв без поля: цель перефиксируется лениво от текущего тапа.
+      goal: Number.isFinite(sub?.goal) && sub!.goal > 0 ? sub!.goal : 0,
+    };
 
     // Сбрасываем уровни до стартовых, затем накатываем из сейва.
     for (const o of objectDefs) o.currentLevel = o.startLevel;
@@ -191,6 +302,7 @@ export class GameState {
 
     // Потоки пересчитываем из дефов, а не верим сейву — защита от рассинхрона.
     this.invalidateCaches();
+    events.emit('objects:changed', undefined); // сцена должна перечитать owned/тиры
   }
 
   /**
@@ -206,6 +318,7 @@ export class GameState {
         : Math.max(o.startLevel, Math.min(Math.floor(lvl), o.maxLevel));
     }
     this.invalidateCaches();
+    events.emit('objects:changed', undefined); // сцена/перф-зависимости перечитывают всё
   }
 
   /** Сколько денег накопилось бы за время offlineSeconds (с эффективностью офлайна). */

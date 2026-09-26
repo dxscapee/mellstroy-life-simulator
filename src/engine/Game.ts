@@ -24,6 +24,8 @@ export class Game {
 
   private saveManager: SaveManager;
   private saveTimer = 0;
+  /** Таймер пассивного прироста подписчиков (раз в gameConfig.subscribers.addIntervalSec). */
+  private subscriberTimer = 0;
   private saveOnHideBound = this.handleVisibilityChange.bind(this);
 
   constructor() {
@@ -72,6 +74,15 @@ export class Game {
   private tick(dt: number): void {
     this.state.applyIncomeForDuration(dt);
 
+    // Пассивный прирост подписчиков: раз в интервал капает пассивный доход за него.
+    this.subscriberTimer += dt;
+    if (this.subscriberTimer >= gameConfig.subscribers.addIntervalSec) {
+      this.subscriberTimer -= gameConfig.subscribers.addIntervalSec;
+      const wasReady = this.state.subscribers.claimable;
+      this.state.addSubscribersFromPassive(gameConfig.subscribers.addIntervalSec);
+      this.emitSubscriberEvents(wasReady);
+    }
+
     this.saveTimer += dt;
     if (this.saveTimer >= gameConfig.autoSaveIntervalSec) {
       this.saveTimer = 0;
@@ -85,9 +96,31 @@ export class Game {
 
   handleTap(): Decimal {
     const amount = this.state.applyTap();
+    // Бонус подписчиков за каждый N-й клик (величина = доход за этот клик).
+    const subsWereReady = this.state.subscribers.claimable;
+    this.state.addSubscribersFromTap(amount);
+    this.emitSubscriberEvents(subsWereReady);
+
     events.emit('tap:earned', { amount, totalTaps: this.state.tapsCount });
     events.emit('money:changed', undefined);
     return amount;
+  }
+
+  /** Эмитим события подписчиков только при фактических изменениях. */
+  private emitSubscriberEvents(wasReady: boolean): void {
+    const isReady = this.state.subscribers.claimable;
+    if (isReady && !wasReady) events.emit('subscribers:ready', undefined);
+    else events.emit('subscribers:changed', undefined);
+  }
+
+  /** Забрать награду за заполненную шкалу подписчиков. Возвращает сумму или null. */
+  claimSubscribers(): Decimal | null {
+    const reward = this.state.claimSubscribers();
+    if (reward) {
+      events.emit('money:changed', undefined);
+      events.emit('subscribers:changed', undefined);
+    }
+    return reward;
   }
 
   /** Покупка уровня объекта. Возвращает деф, если покупка состоялась. */

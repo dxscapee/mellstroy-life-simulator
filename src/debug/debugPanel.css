@@ -22,8 +22,8 @@
 
 #debug-panel {
   position: fixed;
-  top: 26px;
-  right: 10px;
+  top: 40px;
+  left: 10px; /* сбоку от центрального HUD */
   width: 220px;
   background: rgba(12, 12, 12, 0.92);
   border: 1px solid #e74c3c;
@@ -35,6 +35,15 @@
   z-index: 9999;
   pointer-events: auto;
   font-family: monospace;
+}
+
+/* Узкие экраны: панель компактнее, чтобы не налезала на HUD 420px. */
+@media (max-width: 700px) {
+  #debug-panel {
+    width: 190px;
+    top: 34px;
+    left: 6px;
+  }
 }
 
 #debug-panel.visible {
@@ -79,4 +88,11 @@
   background: #e74c3c;
   border-color: #e74c3c;
   color: #fff;
+}
+
+/* Активный форс (например, «Тап = 1000$ (ВКЛ)») — видно, что экономика подменена. */
+#debug-panel button.active-forced {
+  background: #f1c40f;
+  border-color: #f1c40f;
+  color: #222;
 }

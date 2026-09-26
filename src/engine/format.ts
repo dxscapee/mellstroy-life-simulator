@@ -45,6 +45,11 @@ export function formatIncomePerSecond(value: Decimal): string {
   return '+' + formatNumber(value) + '/сек';
 }
 
+/** Форматирование обычного числа (подписчики, цели шкал) через тот же суффиксный пайплайн. */
+export function formatCount(value: number): string {
+  return formatNumber(new Decimal(Number.isFinite(value) ? value : 0));
+}
+
 export function formatTime(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(s / 3600);

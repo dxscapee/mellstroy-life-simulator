@@ -1,16 +1,16 @@
 import { events } from '@engine/eventBus';
-import { formatIncomePerSecond, formatMoney } from '@engine/format';
+import { formatCount, formatMoney, formatIncomePerSecond } from '@engine/format';
 import type { Game } from '@engine/Game';
 import { Modal } from './OfflineModal';
 import { ObjectSheet } from './ObjectSheet';
 
 /**
- * Композитор HTML-слоя: создаёт HUD, шторку и модалку, подписывает их
+ * Композитор HTML-слоя: создаёт HUD, выноску и модалку, подписывает их
  * на события движка. Логики не содержит — только связывание и рендер.
  *
- * HUD показывает оба потока экономики:
- *  - P — пассивный доход в секунду;
- *  - A — доход за один тап.
+ * HUD — единый центральный блок 2×2 (не растягивается, как и нижнее меню):
+ *   [пассив /сек]  [баланс $ всего]
+ *   [тап /клик  ]  [подписчики + бар]
  */
 export class UIManager {
   readonly sheet: ObjectSheet;
@@ -19,8 +19,14 @@ export class UIManager {
   private balanceEl: HTMLElement;
   private passiveEl: HTMLElement;
   private activeEl: HTMLElement;
+  private subChip: HTMLButtonElement;
+  private subBarFill: HTMLElement;
+  private subCountEl: HTMLElement;
+  private subGoalEl: HTMLElement;
   private lastBalanceRendered: string | null = null;
   private lastPassiveRendered: string | null = null;
+  private lastActiveRendered: string | null = null;
+  private lastSubKey: string | null = null;
   private hudThrottle = 0;
   private unsubscribers: Array<() => void> = [];
 
@@ -28,34 +34,89 @@ export class UIManager {
     uiRoot: HTMLElement,
     private readonly game: Game,
   ) {
-    // ---------- HUD ----------
+    // ---------- HUD: центральный блок 2×2 ----------
     const hud = document.createElement('header');
     hud.className = 'hud-top';
+    hud.appendChild(this.mkStat('пассив /сек', this.passiveEl = document.createElement('div')));
+    hud.appendChild(this.mkStat('$ всего', this.balanceEl = document.createElement('div')));
+    hud.appendChild(this.mkStat('за клик', this.activeEl = document.createElement('div')));
 
-    this.balanceEl = document.createElement('div');
-    this.balanceEl.className = 'hud-balance';
-    this.balanceEl.textContent = formatMoney(game.state.money);
+    // Правая нижняя ячейка: подписчики (клик = забрать награду).
+    // Иконка вместо надписи — компактнее, всё влезает в ячейку.
+    this.subChip = document.createElement('button');
+    this.subChip.className = 'hud-cell sub-cell js-interactive';
+    this.subChip.type = 'button';
 
-    this.passiveEl = document.createElement('div');
-    this.passiveEl.className = 'hud-income hud-passive';
-    this.passiveEl.textContent = formatIncomePerSecond(game.state.passiveIncomePerSecond);
+    const subIcon = document.createElement('span');
+    subIcon.className = 'sub-icon';
+    subIcon.textContent = '👤';
 
-    this.activeEl = document.createElement('div');
-    this.activeEl.className = 'hud-income hud-active';
-    this.activeEl.textContent = `A: +${formatMoney(game.state.getMoneyPerTap())} за тап`;
+    // Счёт и цель — РАЗНЫЕ элементы: цель не должна ломать счёт при нехватке места,
+    // и всё прижато к иконке влево (не растягивается по ячейке).
+    this.subCountEl = document.createElement('span');
+    this.subCountEl.className = 'sub-count';
+    this.subCountEl.textContent = '0';
 
-    hud.append(this.balanceEl, this.passiveEl, this.activeEl);
+    this.subGoalEl = document.createElement('span');
+    this.subGoalEl.className = 'sub-goal';
+    this.subGoalEl.textContent = '/ 0';
+
+    const subTrack = document.createElement('div');
+    subTrack.className = 'sub-track';
+    this.subBarFill = document.createElement('div');
+    this.subBarFill.className = 'sub-fill';
+    subTrack.appendChild(this.subBarFill);
+
+    const subTop = document.createElement('div');
+    subTop.className = 'sub-top';
+    subTop.append(subIcon, this.subCountEl, this.subGoalEl);
+    this.subChip.append(subTop, subTrack);
+    this.subChip.addEventListener('click', () => this.onSubChipClick());
+
+    hud.appendChild(this.subChip);
     uiRoot.appendChild(hud);
 
     this.sheet = new ObjectSheet(uiRoot, game);
     this.modal = new Modal(uiRoot);
+
+    this.renderHud();
+    this.renderSubscribers(true);
 
     // ---------- подписки ----------
     this.unsubscribers.push(
       events.on('tick', () => this.onTick()),
       events.on('tap:earned', () => this.forceHud()),
       events.on('object:levelup', () => this.forceHud()),
+      events.on('subscribers:changed', () => this.renderSubscribers()),
+      events.on('subscribers:ready', () => this.renderSubscribers()),
+      // Полный сброс (дебаг): HUD и подписчики могут не измениться по ключам — рендерим принудительно.
+      events.on('game:reset', () => {
+        this.lastSubKey = null;
+        this.forceHud();
+      }),
     );
+  }
+
+  private onSubChipClick(): void {
+    const reward = this.game.claimSubscribers();
+    if (reward) {
+      console.info(`[UI] Награда подписчиков забрана: ${formatMoney(reward)}`);
+    }
+  }
+
+  /** Ячейка-статистика: подпись сверху, значение снизу (значение заполняется renderHud). */
+  private mkStat(caption: string, valueEl: HTMLElement): HTMLElement {
+    const cell = document.createElement('div');
+    cell.className = 'hud-cell';
+
+    const cap = document.createElement('span');
+    cap.className = 'cell-caption';
+    cap.textContent = caption;
+
+    valueEl.className = 'cell-value';
+
+    cell.append(cap, valueEl);
+    return cell;
   }
 
   private onTick(): void {
@@ -69,7 +130,9 @@ export class UIManager {
   private forceHud(): void {
     this.lastBalanceRendered = null; // форс-перерисовка
     this.lastPassiveRendered = null;
+    this.lastActiveRendered = null;
     this.renderHud();
+    this.renderSubscribers();
   }
 
   private renderHud(): void {
@@ -87,8 +150,34 @@ export class UIManager {
       this.lastPassiveRendered = passiveStr;
     }
 
-    // Активный поток меняется только при смене уровней — пишется на forceHud.
-    this.activeEl.textContent = `A: +${formatMoney(state.getMoneyPerTap())} за тап`;
+    // Активный поток меняется только при смене уровней — но пишем по кэшу строки.
+    const activeStr = '+' + formatMoney(state.getMoneyPerTap()) + '/клик';
+    if (activeStr !== this.lastActiveRendered) {
+      this.activeEl.textContent = activeStr;
+      this.lastActiveRendered = activeStr;
+    }
+  }
+
+  private renderSubscribers(force = false): void {
+    const state = this.game.state;
+    const s = state.subscribers;
+    const goal = state.getSubscriberGoal();
+    const pct = s.claimable ? 100 : Math.min(100, (s.progress / goal) * 100);
+    // Ключ всех видимых величин: перезапись DOM только при изменениях.
+    const key = `${s.count.toFixed(2)}|${pct.toFixed(2)}|${s.claimable}|${goal}`;
+    if (!force && key === this.lastSubKey) return;
+    this.lastSubKey = key;
+
+    if (s.claimable) {
+      this.subCountEl.textContent = `Забрать ${formatMoney(state.getSubscriberReward())}`;
+      this.subGoalEl.style.display = 'none'; // вся строка — под награду
+    } else {
+      this.subCountEl.textContent = formatCount(s.count);
+      this.subGoalEl.style.display = '';
+      this.subGoalEl.textContent = `/ ${formatCount(goal)}`;
+    }
+    this.subBarFill.style.width = `${pct}%`;
+    this.subChip.classList.toggle('claimable', s.claimable);
   }
 
   destroy(): void {

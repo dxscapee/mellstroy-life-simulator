@@ -40,7 +40,10 @@ export interface ObjectDef {
   currentLevel: number;
 }
 
-/** Сериализуемый снимок состояния (формат v2 — экономика P/A-потоков). */
+/**
+ * Сериализуемый снимок состояния (формат v2 — экономика P/A-потоков).
+ * subscribers опционален: сейвы v2 до введения подписчиков валидны без него.
+ */
 export interface GameStateSnapshot {
   version: 2;
   money: string;
@@ -48,7 +51,26 @@ export interface GameStateSnapshot {
   tapsCount: number;
   /** id -> уровень (сохраняются только уровни > 0). */
   objects: Record<string, number>;
+  subscribers?: SubscriberState;
   savedAt: number;
+}
+
+/** Прогресс подписчиков: шкала с накоплением и наградой за заполнение. */
+export interface SubscriberState {
+  /** Всего подписчиков за всё время (дробная часть — внутренняя точность потока). */
+  count: number;
+  /** Накопленный прогресс к текущей цели (сбрасывается при claim). */
+  progress: number;
+  /** Сколько наград уже забрано. */
+  claimed: number;
+  /** Цель набрана — чип кликабелен, ждёт награды. */
+  claimable: boolean;
+  /**
+   * Цель ТЕКУЩЕГО цикла: фиксируется в момент старта цикла и НЕ тянется
+   * за ростом дохода за клик. После claim: goal += goalMult × (тап на момент клейма).
+   * 0 = цель ещё не посчитана (инициализируется лениво от текущего тапа).
+   */
+  goal: number;
 }
 
 /** Параметры офлайн-дохода. */
@@ -68,4 +90,10 @@ export type GameEventMap = {
   'tap:earned': { amount: Decimal; totalTaps: number };
   /** Уровень любого объекта вырос (включая первую покупку-«анлок»). */
   'object:levelup': ObjectDef;
+  /** Прогресс подписчиков изменился (тикающий прирост или бонус за клики). */
+  'subscribers:changed': undefined;
+  /** Цель подписчиков набрана — чип кликабелен за награду. */
+  'subscribers:ready': undefined;
+  /** Уровни объектов изменены массово (applyLevels/загрузка сейва) — сцене надо перечитать всё. */
+  'objects:changed': undefined;
 };

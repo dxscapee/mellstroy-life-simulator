@@ -44,6 +44,23 @@ export function setupDebugPanel(game: Game): void {
     console.info('[Debug] Все объекты разблокированы (lvl 1)');
   });
 
+  // Форс дохода за тап для проверки поздней экономики (цены, подписчики, тиры).
+  // Переключатель: состояние читается из модели (isTapOverridden), повторный клик снимает.
+  const LATE_TAP = 1_000;
+  const tapOverrideBtn = mkBtn(`Тап = ${LATE_TAP}$ (форс)`, () => {
+    if (game.state.isTapOverridden()) {
+      game.state.setTapOverride(null);
+      tapOverrideBtn.textContent = `Тап = ${LATE_TAP}$ (форс)`;
+      tapOverrideBtn.classList.remove('active-forced');
+      console.info('[Debug] Форс тапа снят — обычная формула весов');
+    } else {
+      game.state.setTapOverride(new Decimal(LATE_TAP));
+      tapOverrideBtn.textContent = `Тап = ${LATE_TAP}$ (ВКЛ)`;
+      tapOverrideBtn.classList.add('active-forced');
+      console.info(`[Debug] Тап форсирован: ${LATE_TAP}$/клик (повторный клик — снять)`);
+    }
+  });
+
   // Сброс с инлайн-подтверждением (confirm() заблокирован в вебвью Яндекса).
   let resetArmed = false;
   let resetDisarmTimer = 0;
@@ -64,6 +81,9 @@ export function setupDebugPanel(game: Game): void {
     resetBtn.textContent = 'Сбросить сейв';
     resetBtn.classList.remove('danger');
     game.resetAll();
+    // resetProgress чистит форс в модели — синхронизируем кнопку.
+    tapOverrideBtn.textContent = `Тап = ${LATE_TAP}$ (форс)`;
+    tapOverrideBtn.classList.remove('active-forced');
     console.info('[Debug] Сейв сброшен');
   });
 
@@ -105,7 +125,7 @@ export function setupDebugPanel(game: Game): void {
   cornerDot.addEventListener('click', toggle);
   document.body.appendChild(cornerDot);
 
-  panelEl.append(title, addMoneyBtn, unlockAllBtn, resetBtn, speedRow, rewardedBtn, fullscreenBtn);
+  panelEl.append(title, addMoneyBtn, unlockAllBtn, tapOverrideBtn, resetBtn, speedRow, rewardedBtn, fullscreenBtn);
   document.body.appendChild(panelEl);
 
   window.addEventListener('keydown', onKeydown);

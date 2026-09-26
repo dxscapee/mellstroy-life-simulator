@@ -32,6 +32,11 @@ export class GameView {
   private character: Container | null = null;
   private house: Container | null = null;
   private car: Container | null = null;
+  /** Плейсхолдеры остальных объектов: двор + рабочее место (рисуются при покупке). */
+  private yard: Container | null = null;
+  private workplace = new Map<string, Container>(); // tech | pc | furniture
+  /** Носимые плейсхолдеры на персонаже: watch | face | clothes (видны при покупке). */
+  private worn = new Map<string, Container>();
   /** Подпись стадии над сценовым объектом (плейсхолдер вместо спрайтов). */
   private stageLabels = new Map<string, Text>();
   private charBaseX = 0;
@@ -59,9 +64,12 @@ export class GameView {
     this.host.appendChild(this.app.canvas);
 
     this.buildBackground();
+    this.buildYard();
     this.buildHouse();
     this.buildCar();
+    this.buildWorkplace();
     this.buildCharacter();
+    this.buildWorn();
 
     // Ввод: вся сцена кликабельна, тапы «пробивают» с HTML-оверлея
     // (у оверлея pointer-events: none, у холста — auto).
@@ -146,6 +154,115 @@ export class GameView {
     this.app.stage.addChild(c);
   }
 
+  /**
+   * Двор-плейсхолдер (просто фигура за домом; позже — многослойный фон).
+   * Зависит от тира: пустырь (перекрестье) → асфальт (серый) → паркет (теплый).
+   */
+  private buildYard(): void {
+    const c = new Container();
+    const g = new Graphics();
+    g.roundRect(-130, -90, 260, 180, 12).fill(0x2a333f);
+    // «Перекрестье» — метка пустыря, чтобы объект был виден даже на тире 0.
+    g.moveTo(-90, 0).lineTo(90, 0).moveTo(0, -55).lineTo(0, 55)
+      .stroke({ width: 3, color: 0x3a4655 });
+    g.roundRect(-130, -90, 260, 180, 12).stroke({ width: 3, color: 0x3a4655 });
+    c.addChild(g);
+
+    c.visible = false; // появляется после покупки
+    this.yard = c;
+    this.app.stage.addChild(c);
+  }
+
+  /** Рабочее место: микрофон/комп/мебель — три отдельных плейсхолдера. */
+  private buildWorkplace(): void {
+    // Микрофон: капсула на стойке (тир 0) → студийный (тир 1) → золотой (тир 2).
+    const tech = new Container();
+    const tCapsule = new Graphics();
+    tCapsule.roundRect(-11, -44, 22, 32, 11).fill(0x56657a);
+    tech.addChild(tCapsule);
+    const tGrill = new Graphics();
+    tGrill.roundRect(-8, -41, 16, 12, 5).fill(0x22303d);
+    tech.addChild(tGrill);
+    const tHolder = new Graphics();
+    tHolder.roundRect(-6, -12, 12, 12, 3).fill(0x3a4655);
+    tech.addChild(tHolder);
+    const tStand = new Graphics();
+    tStand.rect(-2.5, 0, 5, 42).fill(0x3a4655);
+    tStand.roundRect(-16, 42, 32, 6, 3).fill(0x3a4655);
+    tech.addChild(tStand);
+    this.workplace.set('tech', tech);
+
+    // Комп: монитор на подставке.
+    const pc = new Container();
+    const pScreen = new Graphics();
+    pScreen.roundRect(-36, -30, 72, 48, 6).fill(0x1c2632);
+    pc.addChild(pScreen);
+    const pGlow = new Graphics();
+    pGlow.roundRect(-30, -24, 60, 36, 4).fill(0x39c2ff);
+    pGlow.alpha = 0.85;
+    pc.addChild(pGlow);
+    const pStand = new Graphics();
+    pStand.rect(-4, 18, 8, 14).fill(0x2c3846);
+    pStand.roundRect(-18, 30, 36, 6, 3).fill(0x2c3846);
+    pc.addChild(pStand);
+    this.workplace.set('pc', pc);
+
+    // Мебель: стул.
+    const furniture = new Container();
+    const fBack = new Graphics();
+    fBack.roundRect(-18, -34, 36, 40, 5).fill(0x7a5a3a);
+    furniture.addChild(fBack);
+    const fSeat = new Graphics();
+    fSeat.roundRect(-22, 4, 44, 12, 4).fill(0x8c6a46);
+    furniture.addChild(fSeat);
+    const fLegs = new Graphics();
+    fLegs.moveTo(-18, 16).lineTo(-18, 46).moveTo(18, 16).lineTo(18, 46)
+      .stroke({ width: 5, color: 0x5d4429 });
+    furniture.addChild(fLegs);
+    this.workplace.set('furniture', furniture);
+
+    for (const item of this.workplace.values()) {
+      item.visible = false; // появляется после покупки
+      this.app.stage.addChild(item);
+    }
+  }
+
+  /**
+   * Носимые плейсхолдеры на персонаже. addChild идёт ПОСЛЕ character,
+   * поэтому они рисуются поверх тела (см. layout: те же координаты + офсеты).
+   */
+  private buildWorn(): void {
+    // Часы — на «запястье» (правый низ тела).
+    const watch = new Container();
+    const wStrap = new Graphics();
+    wStrap.roundRect(0, 0, 10, 26, 4).fill(0x22303d);
+    watch.addChild(wStrap);
+    const wFace = new Graphics();
+    wFace.circle(5, 13, 9).fill(0xf1c40f);
+    watch.addChild(wFace);
+    this.worn.set('watch', watch);
+
+    // Лицо — «очки поверх» (тир 0 — просто улыбка-заглушка).
+    const face = new Container();
+    const fSmile = new Graphics();
+    fSmile.arc(0, 0, 14, 0.35, Math.PI - 0.35).stroke({ width: 4, color: 0xb98a54 });
+    face.addChild(fSmile);
+    this.worn.set('face', face);
+
+    // Шмот — «цепь» на груди (видна поверх тела; толще — заметнее на зелёном).
+    const clothes = new Container();
+    const chain = new Graphics();
+    chain.moveTo(-30, 26).quadraticCurveTo(0, 46, 30, 26).stroke({ width: 6, color: 0xf7d774 });
+    chain.circle(0, 40, 6).fill(0xf7d774); // кулон
+    clothes.addChild(chain);
+    this.worn.set('clothes', clothes);
+
+    for (const item of this.worn.values()) {
+      item.visible = false; // появляется после покупки
+      this.app.stage.addChild(item);
+    }
+  }
+
   /** Заглушка персонажа из примитивов — позже заменится на спрайты/атлас. */
   private buildCharacter(): void {
     const c = new Container();
@@ -204,9 +321,45 @@ export class GameView {
       this.character.y = this.charBaseY;
     }
 
+    // Двор — за домом (чуть больше и ниже).
+    if (this.yard) {
+      this.yard.x = this.house?.x ?? w * 0.5;
+      this.yard.y = (this.house?.y ?? h * 0.34) + 40;
+    }
+
+    // Рабочее место — нижний ряд; тачка поднята выше, чтобы не толкаться с техникой.
+    const wpY = h * 0.84;
+    if (this.car) {
+      this.car.x = w * 0.16;
+      this.car.y = h * 0.68;
+    }
+    if (this.workplace.size) {
+      // Порядок по ТЗ: стул → монитор → микрофон.
+      this.workplace.get('furniture')!.position.set(w * 0.26, wpY);
+      this.workplace.get('pc')!.position.set(w * 0.47, wpY - 8);
+      this.workplace.get('tech')!.position.set(w * 0.68, wpY);
+    }
+
+    // Носимые следуют за персонажем (с учётом его idle-покачивания в update).
+    this.syncWornPositions();
+
     // Подписи стадий следуют за своими объектами.
     this.stageLabels.get('house')?.position.set(this.house?.x ?? 0, (this.house?.y ?? 0) - 130);
     this.stageLabels.get('car')?.position.set(this.car?.x ?? 0, (this.car?.y ?? 0) - 70);
+    this.stageLabels.get('bg')?.position.set(this.yard?.x ?? 0, (this.yard?.y ?? 0) - 105);
+    this.stageLabels.get('furniture')?.position.set(w * 0.26, wpY - 70);
+    this.stageLabels.get('pc')?.position.set(w * 0.47, wpY - 68);
+    this.stageLabels.get('tech')?.position.set(w * 0.68, wpY - 70);
+  }
+
+  /** Носимые держатся на персонаже (офсеты от его базовой точки). */
+  private syncWornPositions(): void {
+    if (!this.character) return;
+    const x = this.charBaseX;
+    const y = this.charBaseY;
+    this.worn.get('watch')?.position.set(x + 30, y + 66);   // запястье
+    this.worn.get('face')?.position.set(x, y - 6);          // на голове
+    this.worn.get('clothes')?.position.set(x, y + 30);      // грудь
   }
 
   // ------------------------------------------------------------ тиры сцены
@@ -217,19 +370,64 @@ export class GameView {
    */
   applySceneState(states: SceneObjectInfo[]): void {
     for (const s of states) {
-      if (s.id === 'house') {
-        // Плейсхолдер: тир = перекраска контейнера (спрайты стадий придут позже).
-        const tints = [0x3d4a5c, 0x5d6d80, 0x8fa3b8, 0xd8c690]; // коробка → пентхаус
-        if (this.house) this.house.tint = tints[Math.min(s.tier, tints.length - 1)];
-        this.ensureStageLabel('house', s.stageName);
-      } else if (s.id === 'car') {
-        if (this.car) this.car.visible = s.owned;
-        if (s.owned) this.ensureStageLabel('car', s.stageName);
-        else {
-          this.stageLabels.get('car')?.destroy();
-          this.stageLabels.delete('car');
+      switch (s.id) {
+        case 'house': {
+          // Плейсхолдер: тир = перекраска контейнера (спрайты стадий придут позже).
+          const tints = [0x3d4a5c, 0x5d6d80, 0x8fa3b8, 0xd8c690]; // коробка → пентхаус
+          if (this.house) this.house.tint = tints[Math.min(s.tier, tints.length - 1)];
+          this.ensureStageLabel('house', s.stageName);
+          break;
+        }
+        case 'car': {
+          if (this.car) this.car.visible = s.owned;
+          this.toggleStageLabel('car', s.owned, s.stageName);
+          break;
+        }
+        case 'bg': {
+          // Двор: тир = перекраска (пустырь → асфальт → паркет).
+          const yardTints = [0x2a333f, 0x46525f, 0x8a6f4d];
+          if (this.yard) {
+            this.yard.visible = s.owned;
+            this.yard.tint = yardTints[Math.min(s.tier, yardTints.length - 1)];
+          }
+          this.toggleStageLabel('bg', s.owned, s.stageName);
+          break;
+        }
+        case 'tech':
+        case 'pc':
+        case 'furniture': {
+          // Рабочее место: тир = смена акцентного цвета заглушки.
+          const item = this.workplace.get(s.id);
+          if (item) {
+            item.visible = s.owned;
+            const wpTints = [0xffffff, 0x9fffcf, 0xffd97a]; // тир-акцент через tint
+            item.tint = wpTints[Math.min(s.tier, wpTints.length - 1)];
+          }
+          this.toggleStageLabel(s.id, s.owned, s.stageName);
+          break;
+        }
+        case 'watch':
+        case 'face':
+        case 'clothes': {
+          const worn = this.worn.get(s.id);
+          if (worn) {
+            worn.visible = s.owned;
+            const wornTints = [0xffffff, 0xbfe8ff, 0xffd97a];
+            worn.tint = wornTints[Math.min(s.tier, wornTints.length - 1)];
+          }
+          break; // носимые не подписываются — и так на персонаже
         }
       }
+    }
+  }
+
+  /** Показать/скрыть подпись стадии (destroy при скрытии — как раньше для car). */
+  private toggleStageLabel(key: string, show: boolean, text: string): void {
+    if (show) {
+      this.ensureStageLabel(key, text);
+    } else {
+      this.stageLabels.get(key)?.destroy();
+      this.stageLabels.delete(key);
     }
   }
 
@@ -306,6 +504,7 @@ export class GameView {
       // Idle-анимация: лёгкое покачивание.
       this.character.y = this.charBaseY + Math.sin(this.time * 2.2) * 7;
       this.character.rotation = Math.sin(this.time * 1.1) * 0.02;
+      this.syncWornPositions();
     }
 
     // Обновление всплывающих текстов.

@@ -26,9 +26,10 @@ async function bootstrap(): Promise<void> {
 
   // Сцена отражает состояние объектов: тиры, владение тачкой, подписи стадий.
   view.applySceneState(buildSceneState());
-  events.on('object:levelup', () => {
-    view.applySceneState(buildSceneState());
-  });
+  const refreshScene = () => view.applySceneState(buildSceneState());
+  events.on('object:levelup', refreshScene);
+  // Массовые изменения (applyLevels из дебага, загрузка сейва) — сцена перечитывает всё.
+  events.on('objects:changed', refreshScene);
 
   // 3) Слой UI.
   const ui = new UIManager(uiRoot, game);
