@@ -1,0 +1,82 @@
+/* Стили только для дебаг-панели. Импортируются ТОЛЬКО из debugPanel.ts,
+   который вырезается из продакшен-сборки вместе со стилями. */
+
+.debug-corner-dot {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #e74c3c;
+  opacity: 0.55;
+  border: none;
+  cursor: pointer;
+  z-index: 9998;
+  pointer-events: auto;
+}
+
+.debug-corner-dot:hover {
+  opacity: 1;
+}
+
+#debug-panel {
+  position: fixed;
+  top: 26px;
+  right: 10px;
+  width: 220px;
+  background: rgba(12, 12, 12, 0.92);
+  border: 1px solid #e74c3c;
+  border-radius: 12px;
+  padding: 10px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 9999;
+  pointer-events: auto;
+  font-family: monospace;
+}
+
+#debug-panel.visible {
+  display: flex;
+}
+
+#debug-panel h3 {
+  font-size: 13px;
+  color: #e74c3c;
+  text-align: center;
+  margin: 0 0 2px;
+}
+
+#debug-panel button {
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+#debug-panel button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+#debug-panel .row {
+  display: flex;
+  gap: 6px;
+}
+
+#debug-panel .row button {
+  flex: 1;
+}
+
+#debug-panel .debug-speed-active {
+  outline: 2px solid #f1c40f;
+}
+
+#debug-panel button.danger {
+  background: #e74c3c;
+  border-color: #e74c3c;
+  color: #fff;
+}
