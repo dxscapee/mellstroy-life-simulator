@@ -20,9 +20,9 @@ export const gameConfig = {
   startingMoney: new Decimal(50),
 
   /** База АКТИВНОГО потока: доход за один тап «голого» игрока. */
-  moneyPerTap: new Decimal(1),
+  moneyPerTap: new Decimal(2),
   /** База ПАССИВНОГО потока: доход в секунду «голого» игрока. */
-  passiveBase: new Decimal(0.5),
+  passiveBase: new Decimal(1),
 
   /** Эволюция: каждые N уровней объект переходит на следующую стадию (прогресс-бар карточки). */
   tiers: {

@@ -128,21 +128,19 @@ export class ObjectSheet {
     const root = document.createElement('div');
     root.className = 'upgrade-card';
 
-    // ---------- левая часть: иконка + имя ----------
-    const identity = document.createElement('div');
-    identity.className = 'card-identity';
-
+    // ---------- левая часть: иконка ----------
     const icon = document.createElement('div');
     icon.className = 'upgrade-icon';
     icon.textContent = def.icon;
+
+    // ---------- центр: информация ----------
+    const info = document.createElement('div');
+    info.className = 'card-info';
 
     const name = document.createElement('div');
     name.className = 'upgrade-name';
     name.textContent = def.name;
 
-    identity.append(icon, name);
-
-    // ---------- центр: прогресс-бар эволюции ----------
     const bar = document.createElement('div');
     bar.className = 'card-progress';
 
@@ -157,6 +155,7 @@ export class ObjectSheet {
     barLabel.className = 'progress-label';
 
     bar.append(barTrack, barLabel);
+    info.append(name, bar);
 
     // ---------- правая часть: кнопка покупки ----------
     const buyBtn = document.createElement('button');
@@ -166,7 +165,7 @@ export class ObjectSheet {
       // Доступность/цены перерисуются на ближайшем 'tick' (или при открытии шторки).
     });
 
-    root.append(identity, bar, buyBtn);
+    root.append(icon, info, buyBtn);
 
     const card: CardRefs = {
       root, barFillEl: barFill, barLabelEl: barLabel, buyBtn, def,
@@ -263,7 +262,9 @@ export class ObjectSheet {
   private renderLevelDependent(card: CardRefs, level: number, unlocked: boolean): void {
     const def = card.def;
     const state = this.game.state;
-    const perTier = gameConfig.tiers.levelsPerTier;
+
+    // Формируем текст о вкладе в доходы
+    const incomeInfo = this.getIncomeInfo(def);
 
     // ---------- прогресс-бар ----------
     if (!unlocked && def.requires) {
@@ -271,17 +272,18 @@ export class ObjectSheet {
       card.barLabelEl.textContent = `Нужен: ${getObject(def.requires).name}`;
     } else if (state.isMaxed(def)) {
       card.barFillEl.style.width = '100%';
-      card.barLabelEl.textContent = 'Максимальная эволюция';
+      card.barLabelEl.textContent = incomeInfo || 'MAX';
     } else if (level > 0) {
-      const inTier = level % perTier; // 0 возможен только на maxLevel (см. ветку выше)
+      const perTier = gameConfig.tiers.levelsPerTier;
+      const inTier = level % perTier;
       card.barFillEl.style.width = `${(inTier / perTier) * 100}%`;
       const stage = def.tierNames?.[Math.floor(level / perTier)];
       card.barLabelEl.textContent = stage
-        ? `ур. ${level} · ${inTier}/${perTier} · ${stage}`
-        : `ур. ${level} · ещё ${perTier - inTier} до эволюции`;
+        ? `ур. ${level} · ${stage} · ${incomeInfo}`
+        : `ур. ${level} · ${incomeInfo}`;
     } else {
       card.barFillEl.style.width = '0%';
-      card.barLabelEl.textContent = 'Не куплено';
+      card.barLabelEl.textContent = incomeInfo || 'Не куплено';
     }
 
     // ---------- кнопка ----------
@@ -295,5 +297,29 @@ export class ObjectSheet {
       card.buyBtn.textContent = formatMoney(card.cachedCost);
       card.buyBtn.disabled = !state.canAfford(def);
     }
+  }
+
+  /** Формирует текст о вкладе объекта в доходы (активный/пассивный). */
+  private getIncomeInfo(def: ObjectDef): string {
+    const state = this.game.state;
+    const tier = Math.floor(def.currentLevel / gameConfig.tiers.levelsPerTier);
+    const perTier = gameConfig.tiers.weightMultiplierPerTier * gameConfig.tiers.weightDecayPerTier;
+    const tierMult = Math.pow(perTier, tier);
+
+    const parts: string[] = [];
+
+    // Вклад следующего уровня в активный доход
+    if (def.aWeight > 0) {
+      const contribution = gameConfig.moneyPerTap.mul(def.aWeight * tierMult);
+      parts.push(`+${formatMoney(contribution)}/тап`);
+    }
+
+    // Вклад следующего уровня в пассивный доход
+    if (def.pWeight > 0) {
+      const contribution = gameConfig.passiveBase.mul(def.pWeight * tierMult);
+      parts.push(`+${formatMoney(contribution)}/сек`);
+    }
+
+    return parts.length > 0 ? parts.join(' ') : '';
   }
 }

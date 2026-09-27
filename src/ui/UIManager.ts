@@ -172,9 +172,11 @@ export class UIManager {
       this.subCountEl.textContent = `Забрать ${formatMoney(state.getSubscriberReward())}`;
       this.subGoalEl.style.display = 'none'; // вся строка — под награду
     } else {
+      // Показываем текущее количество / целевое количество (count + недостающий прирост)
+      const targetTotal = s.count + (goal - s.progress);
       this.subCountEl.textContent = formatCount(s.count);
       this.subGoalEl.style.display = '';
-      this.subGoalEl.textContent = `/ ${formatCount(goal)}`;
+      this.subGoalEl.textContent = `/ ${formatCount(targetTotal)}`;
     }
     this.subBarFill.style.width = `${pct}%`;
     this.subChip.classList.toggle('claimable', s.claimable);
