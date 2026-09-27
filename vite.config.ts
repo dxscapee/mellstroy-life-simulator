@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
 
-// Алиасы зеркалят tsconfig paths — держим их синхронно.
+// Псевдонимы отражают tsconfig paths - держим их синхронно.
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
@@ -15,6 +15,11 @@ export default defineConfig({
       '@services': r('src/services'),
       '@debug': r('src/debug'),
     },
+  },
+  server: {
+    port: 5050,
+    strictPort: true,
+    open: true, // Автоматически открывает игру в браузере при запуске
   },
   build: {
     target: 'es2020',

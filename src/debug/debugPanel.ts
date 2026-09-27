@@ -3,7 +3,7 @@ import Decimal from 'break_infinity.js';
 import type { Game } from '@engine/Game';
 import { gameConfig } from '@data/gameConfig';
 import { objectDefs } from '@data/objects';
-import { yandexService } from '@services/yandex';
+import { formatNumber } from '@engine/format';
 
 /**
  * ДЕБАГ-ПАНЕЛЬ (только для dev).
@@ -15,12 +15,23 @@ import { yandexService } from '@services/yandex';
  * ВАЖНО для zero-leakage:
  *  - нигде, кроме блока DEV, на него не должно быть статических ссылок;
  *  - прод-логика не должна знать о его существовании (общается только с Game).
+ *
+ * Раскладка (по скетчу владельца): группа «Баланс» [поле|×10|×100|$],
+ * группа «Per second» [поле|×10|×100|$], Отменить, +1 lvl, скорость,
+ * Сброс, большие логи.
  */
 
 const PANEL_ID = 'debug-panel';
 
 let panelEl: HTMLElement | null = null;
 let speedButtons: HTMLButtonElement[] = [];
+let logListEl: HTMLElement | null = null;
+let undoBtn: HTMLButtonElement | null = null;
+
+/** Отменяемое действие: подпись + замыкание отката. */
+type DebugAction = { label: string; undo: () => void };
+const undoStack: DebugAction[] = [];
+const UNDO_LIMIT = 25;
 
 export function setupDebugPanel(game: Game): void {
   if (document.getElementById(PANEL_ID)) return;
@@ -31,63 +42,85 @@ export function setupDebugPanel(game: Game): void {
   const title = document.createElement('h3');
   title.textContent = 'DEBUG ~';
 
-  const addMoneyBtn = mkBtn('+ 1 000 000$', () => {
-    game.state.addMoney(new Decimal(1_000_000));
-    console.info('[Debug] Начислено 1 000 000$');
-  });
-
-  // Разблокировать и купить 1-й уровень всех объектов (проверка гейтов/тиров).
-  const unlockAllBtn = mkBtn('Unlock all (lvl 1)', () => {
-    const levels: Record<string, number> = {};
-    for (const o of objectDefs) levels[o.id] = Math.max(1, o.currentLevel);
-    game.state.applyLevels(levels);
-    console.info('[Debug] Все объекты разблокированы (lvl 1)');
-  });
-
-  // Форс дохода за тап для проверки поздней экономики (цены, подписчики, тиры).
-  // Переключатель: состояние читается из модели (isTapOverridden), повторный клик снимает.
-  const LATE_TAP = 1_000;
-  const tapOverrideBtn = mkBtn(`Тап = ${LATE_TAP}$ (форс)`, () => {
-    if (game.state.isTapOverridden()) {
-      game.state.setTapOverride(null);
-      tapOverrideBtn.textContent = `Тап = ${LATE_TAP}$ (форс)`;
-      tapOverrideBtn.classList.remove('active-forced');
-      console.info('[Debug] Форс тапа снят — обычная формула весов');
-    } else {
-      game.state.setTapOverride(new Decimal(LATE_TAP));
-      tapOverrideBtn.textContent = `Тап = ${LATE_TAP}$ (ВКЛ)`;
-      tapOverrideBtn.classList.add('active-forced');
-      console.info(`[Debug] Тап форсирован: ${LATE_TAP}$/клик (повторный клик — снять)`);
-    }
-  });
-
-  // Сброс с инлайн-подтверждением (confirm() заблокирован в вебвью Яндекса).
-  let resetArmed = false;
-  let resetDisarmTimer = 0;
-  const resetBtn = mkBtn('Сбросить сейв', () => {
-    if (!resetArmed) {
-      resetArmed = true;
-      resetBtn.textContent = 'Точно? (ещё раз)';
-      resetBtn.classList.add('danger');
-      resetDisarmTimer = window.setTimeout(() => {
-        resetArmed = false;
-        resetBtn.textContent = 'Сбросить сейв';
-        resetBtn.classList.remove('danger');
-      }, 3000);
+  // ============ Группа «Баланс»: [поле][×10][×100][$] ============
+  const balanceLabel = mkLabel('Баланс');
+  const moneyRow = document.createElement('div');
+  moneyRow.className = 'row';
+  const moneyInput = mkInput('1M');
+  const addMoneyBtn = mkBtn('$', () => {
+    const amount = parseDebugAmount(moneyInput.value);
+    if (!amount) {
+      log('Не понял сумму. Примеры: 1M, 2.5B, 1e623', 'warn');
       return;
     }
-    clearTimeout(resetDisarmTimer);
-    resetArmed = false;
-    resetBtn.textContent = 'Сбросить сейв';
-    resetBtn.classList.remove('danger');
-    game.resetAll();
-    // resetProgress чистит форс в модели — синхронизируем кнопку.
-    tapOverrideBtn.textContent = `Тап = ${LATE_TAP}$ (форс)`;
-    tapOverrideBtn.classList.remove('active-forced');
-    console.info('[Debug] Сейв сброшен');
+    const moneyBefore = game.state.money;
+    const totalBefore = game.state.totalEarned;
+    game.state.addMoney(amount);
+    log(`Начислено ${formatNumber(amount)}$`, 'ok');
+    pushUndo(`деньги +${formatNumber(amount)}$`, () => {
+      // Полный откат: и баланс, и totalEarned (стадии мира откатятся тиком).
+      game.state.money = Decimal.max(moneyBefore, gameConfig.startingMoney);
+      game.state.totalEarned = Decimal.max(totalBefore, new Decimal(0));
+      game.refreshAfterDebug();
+      log(`Откат денег: −${formatNumber(amount)}$`);
+    });
+  });
+  moneyRow.append(moneyInput, ...mkMultButtons(moneyInput), addMoneyBtn);
+
+  // ============ Группа «Per second»: [поле][×10][×100][$] ============
+  const tapLabel = mkLabel('Per second');
+  const tapRow = document.createElement('div');
+  tapRow.className = 'row';
+  const tapInput = mkInput('1000');
+  const tapOverrideBtn = mkBtn('$', () => {
+    if (game.state.isTapOverridden()) {
+      game.state.setTapOverride(null);
+      tapOverrideBtn.classList.remove('active-forced');
+      log('Форс тапа снят — обычная формула весов');
+      return;
+    }
+    const amount = parseDebugAmount(tapInput.value);
+    if (!amount) {
+      log('Не понял сумму тапа. Примеры: 1000, 1e5, 2.5B', 'warn');
+      return;
+    }
+    game.state.setTapOverride(amount);
+    tapOverrideBtn.classList.add('active-forced');
+    log(`Тап форсирован: ${formatNumber(amount)}$/клик (повторный $ — снять)`, 'ok');
+  });
+  tapOverrideBtn.title = 'Вкл/выкл форс тапа';
+  tapRow.append(tapInput, ...mkMultButtons(tapInput), tapOverrideBtn);
+
+  // ============ Отменить (полная ширина) ============
+  undoBtn = mkBtn('↩ Отменить', () => {
+    const action = undoStack.pop();
+    if (!action) {
+      log('Нечего отменять', 'warn');
+      return;
+    }
+    action.undo();
+    refreshUndoButton();
+  });
+  undoBtn.disabled = true;
+  refreshUndoButton();
+
+  // ============ +1 lvl (полная ширина) ============
+  const lvlAllBtn = mkBtn('+1 lvl всем', () => {
+    const before: Record<string, number> = {};
+    for (const o of objectDefs) before[o.id] = o.currentLevel;
+    const levels: Record<string, number> = {};
+    for (const o of objectDefs) {
+      levels[o.id] = Math.min(o.maxLevel, o.currentLevel + 1);
+    }
+    game.state.applyLevels(levels);
+    log('Всем объектам +1 уровень', 'ok');
+    pushUndo('+1 lvl всем', () => {
+      game.state.applyLevels(before);
+      log('Откат: уровни восстановлены');
+    });
   });
 
-  // --- ускорение времени ---
+  // ============ Скорость (x1 выбрана по умолчанию) ============
   const speedRow = document.createElement('div');
   speedRow.className = 'row';
   speedButtons = [];
@@ -95,28 +128,45 @@ export function setupDebugPanel(game: Game): void {
     const b = mkBtn(`x${scale}`, () => {
       game.setTimeScale(scale);
       refreshSpeedHighlight(scale);
-      console.info(`[Debug] Скорость времени: x${scale}`);
+      log(`Скорость времени: x${scale}`);
     });
     speedButtons.push(b);
     speedRow.appendChild(b);
   }
+  game.setTimeScale(1);
+  refreshSpeedHighlight(1);
 
-  // --- тест рекламы ---
-  const rewardedBtn = mkBtn('Rewarded (тест)', async () => {
-    console.info('[Debug] Запуск теста Rewarded…');
-    const result = await yandexService.showRewardedVideo();
-    if (result === 'rewarded') {
-      game.state.addMoney(new Decimal(10_000));
-      console.info('[Debug] Награда выдана: +10 000$ (тестовая)');
-    } else {
-      console.info(`[Debug] Rewarded завершён без награды: ${result}`);
+  // ============ Сброс (полная ширина) ============
+  let resetArmed = false;
+  let resetDisarmTimer = 0;
+  const resetBtn = mkBtn('Сброс', () => {
+    if (!resetArmed) {
+      resetArmed = true;
+      resetBtn.textContent = 'Точно? (ещё раз)';
+      resetBtn.classList.add('danger');
+      resetDisarmTimer = window.setTimeout(() => {
+        resetArmed = false;
+        resetBtn.textContent = 'Сброс';
+        resetBtn.classList.remove('danger');
+      }, 3000);
+      return;
     }
+    clearTimeout(resetDisarmTimer);
+    resetArmed = false;
+    resetBtn.textContent = 'Сброс';
+    resetBtn.classList.remove('danger');
+    game.resetAll();
+    // resetProgress чистит форс в модели — синхронизируем кнопку $ тапа.
+    tapOverrideBtn.classList.remove('active-forced');
+    undoStack.length = 0; // после сброса откатывать нечего
+    refreshUndoButton();
+    log('Сейв сброшен', 'warn');
   });
 
-  const fullscreenBtn = mkBtn('Fullscreen adv (тест)', async () => {
-    const shown = await yandexService.showFullscreenAdv();
-    console.info(`[Debug] showFullscreenAdv: wasShown=${shown}`);
-  });
+  // ============ Логи (большая область) ============
+  logListEl = document.createElement('div');
+  logListEl.className = 'log-list';
+  logListEl.textContent = '';
 
   // --- скрытая кнопка-точка в углу ---
   const cornerDot = document.createElement('button');
@@ -125,19 +175,110 @@ export function setupDebugPanel(game: Game): void {
   cornerDot.addEventListener('click', toggle);
   document.body.appendChild(cornerDot);
 
-  panelEl.append(title, addMoneyBtn, unlockAllBtn, tapOverrideBtn, resetBtn, speedRow, rewardedBtn, fullscreenBtn);
+  panelEl.append(
+    title,
+    balanceLabel,
+    moneyRow,
+    tapLabel,
+    tapRow,
+    undoBtn,
+    lvlAllBtn,
+    speedRow,
+    resetBtn,
+    logListEl,
+  );
   document.body.appendChild(panelEl);
 
   window.addEventListener('keydown', onKeydown);
 
-  console.info(
-    '[Debug] Панель готова: клавиша ~ (тильда) или точка в правом верхнем углу.\n' +
-    'В продакшен-сборке этот модуль вырезается tree-shaking-ом.',
+  log('Панель готова: ~ или точка в углу. Суммы: 1M, 2.5B, 1e623');
+}
+
+// -------------------------------------------------------------- действия
+
+/** Кнопки ×10/×100 для конкретного поля: умножают его значение на месте. */
+function mkMultButtons(input: HTMLInputElement): HTMLButtonElement[] {
+  return [10, 100].map((mult) =>
+    mkBtn(`×${mult}`, () => {
+      const current = parseDebugAmount(input.value);
+      if (!current) {
+        log('Сначала корректная сумма: 1M, 2.5B…', 'warn');
+        return;
+      }
+      const next = current.mul(mult);
+      input.value = formatNumber(next); // человекочитаемый вид: 10M, 500M…
+      log(`Сумма ×${mult}: ${formatNumber(next)}$`);
+    }),
   );
 }
 
+/** Запомнить действие для «↩ Отменить» (стек ограничен, LIFO). */
+function pushUndo(label: string, undo: () => void): void {
+  undoStack.push({ label, undo });
+  if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+  refreshUndoButton();
+}
+
+function refreshUndoButton(): void {
+  if (!undoBtn) return;
+  const last = undoStack[undoStack.length - 1];
+  undoBtn.disabled = undoStack.length === 0;
+  undoBtn.textContent = last ? `↩ ${last.label}` : '↩ Отменить';
+}
+
+// ------------------------------------------------------------------- лог
+
+/** Лог панели: строка в списке + дубль в консоль (единая точка). */
+function log(text: string, cls: 'info' | 'ok' | 'warn' = 'info'): void {
+  if (logListEl) {
+    const line = document.createElement('div');
+    line.className = `log-line ${cls}`;
+    const t = new Date();
+    const hh = `${t.getHours()}`.padStart(2, '0');
+    const mm = `${t.getMinutes()}`.padStart(2, '0');
+    const ss = `${t.getSeconds()}`.padStart(2, '0');
+    line.textContent = `${hh}:${mm}:${ss}  ${text}`;
+    logListEl.prepend(line); // новые сверху — автоскролл не нужен
+    while (logListEl.childElementCount > 60) {
+      logListEl.lastChild?.remove();
+    }
+  }
+  if (cls === 'warn') console.warn(`[Debug] ${text}`);
+  else console.info(`[Debug] ${text}`);
+}
+
+// ------------------------------------------------------------ утилиты
+
+/**
+ * Разбор суммы в человекочитаемой нотации: '1M', '2.5B', '1e623', '1000'.
+ * Суффиксы — те же, что в format.ts (K/M/B/T/aa…), плюс чистая экспонента.
+ */
+function parseDebugAmount(raw: string): Decimal | null {
+  let s = raw.trim().replace(',', '.').replace(/\s+/g, '');
+  if (s === '') return null;
+
+  // Чистая экспонента или голое число — Decimal понимает сам.
+  if (/^\d+(\.\d+)?(e\+?\d+)?$/i.test(s)) {
+    const d = new Decimal(s);
+    return d.gt(0) ? d : null;
+  }
+
+  // Суффикс: отделяем мантиссу и множитель 1000^индекс.
+  const m = /^(\d+(?:\.\d+)?)([a-zA-Z]+)$/.exec(s);
+  if (!m) return null;
+  const mantissa = new Decimal(m[1]);
+  const suffix = m[2].toLowerCase();
+  const suffixes = ['', 'k', 'm', 'b', 't', 'aa', 'ab', 'ac', 'ad', 'ae', 'af', 'ag', 'ah', 'ai', 'aj'];
+  const idx = suffixes.indexOf(suffix);
+  if (idx < 0) return null;
+  const d = mantissa.mul(new Decimal(10).pow(idx * 3));
+  return d.gt(0) ? d : null;
+}
+
 function onKeydown(e: KeyboardEvent): void {
-  // "`" и "~" (Shift+`), плюс ё для русской раскладки.
+  // "`"/"~"/Backquote — но НЕ когда фокус в поле ввода панели.
+  const inPanelInput = (e.target as HTMLElement | null)?.closest?.('#debug-panel input');
+  if (inPanelInput) return;
   if (e.key === '`' || e.key === '~' || e.code === 'Backquote') {
     e.preventDefault();
     toggle();
@@ -158,4 +299,20 @@ function mkBtn(label: string, onClick: () => void): HTMLButtonElement {
   b.textContent = label;
   b.addEventListener('click', onClick);
   return b;
+}
+
+function mkLabel(text: string): HTMLElement {
+  const l = document.createElement('div');
+  l.className = 'section-label';
+  l.textContent = text;
+  return l;
+}
+
+function mkInput(initial: string): HTMLInputElement {
+  const i = document.createElement('input');
+  i.type = 'text';
+  i.value = initial;
+  i.spellcheck = false;
+  i.autocomplete = 'off';
+  return i;
 }

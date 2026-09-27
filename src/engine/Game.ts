@@ -6,6 +6,7 @@ import { GameState } from './GameState';
 import { GameLoop } from './GameLoop';
 import { OfflineProgress } from './OfflineProgress';
 import { SaveManager } from './SaveManager';
+import { WorldWatch } from './WorldProgress';
 import type { ObjectDef } from './types';
 
 /**
@@ -26,6 +27,8 @@ export class Game {
   private saveTimer = 0;
   /** Таймер пассивного прироста подписчиков (раз в gameConfig.subscribers.addIntervalSec). */
   private subscriberTimer = 0;
+  /** Наблюдатель периода мира: UI и сцена читают .stage, аллокаций на тике нет. */
+  readonly worldWatch = new WorldWatch();
   private saveOnHideBound = this.handleVisibilityChange.bind(this);
 
   constructor() {
@@ -54,6 +57,9 @@ export class Game {
       this.state.recalculatePassiveIncome();
     }
 
+    // Стадия мира на старте (сейв мог быть далеко в прогрессе).
+    this.worldWatch.update(this.state.totalEarned);
+
     events.emit('money:changed', undefined);
   }
 
@@ -73,6 +79,13 @@ export class Game {
 
   private tick(dt: number): void {
     this.state.applyIncomeForDuration(dt);
+
+    // Период мира: проверка раз в тик — примитивное сравнение period, без аллокаций.
+    // Растёт и от пассива, и от тапов: применённый доход уже в totalEarned.
+    if (this.worldWatch.update(this.state.totalEarned)) {
+      const s = this.worldWatch.stage;
+      events.emit('world:changed', { period: s.period, era: s.era });
+    }
 
     // Пассивный прирост подписчиков: раз в интервал капает пассивный доход за него.
     this.subscriberTimer += dt;
@@ -147,11 +160,27 @@ export class Game {
 
     events.emit('game:reset', undefined);
     events.emit('money:changed', undefined);
+
+    // Мир откатывается в нулевой период: сцена и чип эпохи перечитываются.
+    this.worldWatch.update(this.state.totalEarned);
+    const s = this.worldWatch.stage;
+    events.emit('world:changed', { period: s.period, era: s.era });
   }
 
   /** В dev-режиме дебаг-панель может ускорять время. В проде — no-op. */
   setTimeScale(scale: number): void {
     this.loop.speedScale = Math.max(0.1, scale);
+  }
+
+  /**
+   * Пересинхронизация UI после ПРЯМЫХ мутаций state из dev-инструментов
+   * (undo денег и т.п.): мир перечитает стадию, HUD перерисуется.
+   */
+  refreshAfterDebug(): void {
+    this.worldWatch.update(this.state.totalEarned);
+    const s = this.worldWatch.stage;
+    events.emit('world:changed', { period: s.period, era: s.era });
+    events.emit('money:changed', undefined);
   }
 
   destroy(): void {

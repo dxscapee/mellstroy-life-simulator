@@ -8,6 +8,7 @@ import {
   TextStyle,
 } from 'pixi.js';
 import type { SceneObjectInfo } from '@data/objects';
+import { WorldLayer } from './WorldLayer';
 
 interface FloatText {
   node: Text;
@@ -15,6 +16,41 @@ interface FloatText {
   lifetime: number;
   active: boolean;
 }
+
+/**
+ * ЗАКОН РАСКЛАДКИ СЦЕНЫ (мокап 1120×556 из ТЗ).
+ *
+ * Эталонная композиция задана смещениями (dx, dy) ОТ ЦЕНТРА холста — не долями
+ * ширины/высоты. Два железных правила (требование владельца):
+ * 1) РАЗМЕРЫ ОБЪЕКТОВ НЕ ЗАВИСЯТ ОТ ЭКРАНА. Scale плейсхолдера — его константа;
+ *    при ресайзе меняется ТОЛЬКО положение на экране. Никакого зума сцены.
+ * 2) На широких экранах объекты дрожат от центра лишь немного (drift = излишек
+ *    ширины × DRIFT_GAIN, потолок DRIFT_MAX_TOTAL) и дальше замораживаются —
+ *    «красные линии» мокапа. Дом и двор (dx = 0) всегда строго по центру.
+ * Следствие: на узких окнах объекты сближаются и могут перекрываться —
+ * осознанный размен за нерушимость размеров.
+ */
+
+/** Эталонная ширина мокапа: якоря вычислены для этого размера. */
+const SCENE_REF_WIDTH = 1120;
+/** Насколько px дрейфа даёт каждый px излишка ширины сверх эталона. */
+const DRIFT_GAIN = 0.25;
+/** Потолок дрейфа (px) — ширина «красных коридоров» мокапа (~50–65px). */
+const DRIFT_MAX_TOTAL = 60;
+/** Максимальное эталонное |dx| — нормировка доли дрейфа (самая крайняя точка). */
+const SCENE_MAX_DX = 398;
+
+/** Якорь сценового объекта: смещение от центра эталона + масштаб плейсхолдера. */
+type SceneAnchor = { dx: number; dy: number; scale: number };
+
+// Якоря сняты с мокапа 1120×556 (дом/двор — строго по центру, dx = 0):
+const HOUSE_ANCHOR: SceneAnchor = { dx: 0, dy: -62, scale: 0.68 };
+const YARD_ANCHOR: SceneAnchor = { dx: 0, dy: -60, scale: 0.55 };
+const CAR_ANCHOR: SceneAnchor = { dx: -382, dy: 75, scale: 0.62 };
+const CHAR_ANCHOR: SceneAnchor = { dx: 135, dy: 56, scale: 0.7 };
+const FURNITURE_ANCHOR: SceneAnchor = { dx: -265, dy: 174, scale: 0.88 };
+const PC_ANCHOR: SceneAnchor = { dx: -38, dy: 172, scale: 0.78 };
+const TECH_ANCHOR: SceneAnchor = { dx: 197, dy: 190, scale: 0.72 };
 
 /**
  * Слой 1: игровая сцена Pixi. Знает только про рисование и ввод на холсте.
@@ -29,6 +65,8 @@ export class GameView {
   private host: HTMLElement;
 
   private bg: Sprite | null = null;
+  /** Слой мира: задний фон (обрезка при ресайзе) + растительность вокруг дома. */
+  readonly world: WorldLayer = new WorldLayer();
   private character: Container | null = null;
   private house: Container | null = null;
   private car: Container | null = null;
@@ -41,6 +79,8 @@ export class GameView {
   private stageLabels = new Map<string, Text>();
   private charBaseX = 0;
   private charBaseY = 0;
+  /** Базовый масштаб персонажа (от него считаются squash-эффект и idle). */
+  private charBaseScale = CHAR_ANCHOR.scale;
   private time = 0;
 
   /** Пул текстов «+1$»: без аллокаций на каждый тап. */
@@ -63,6 +103,7 @@ export class GameView {
     });
     this.host.appendChild(this.app.canvas);
 
+    // Порядок depth: градиент → мир (фон+растительность) → сцена (дом, тачка…).
     this.buildBackground();
     this.buildYard();
     this.buildHouse();
@@ -70,6 +111,15 @@ export class GameView {
     this.buildWorkplace();
     this.buildCharacter();
     this.buildWorn();
+
+    // Слои мира: фон — сразу за градиентом, растительность — ПЕРЕД двором
+    // (то есть за двором, домом, тачкой, персонажем — весь передний слой поверх).
+    this.world.init();
+    this.app.stage.addChildAt(this.world.root, this.app.stage.getChildIndex(this.bg!) + 1);
+    this.app.stage.addChildAt(
+      this.world.vegetationRoot,
+      this.app.stage.getChildIndex(this.yard!),
+    );
 
     // Ввод: вся сцена кликабельна, тапы «пробивают» с HTML-оверлея
     // (у оверлея pointer-events: none, у холста — auto).
@@ -294,7 +344,11 @@ export class GameView {
     this.app.stage.addChild(c);
   }
 
-  /** Раскладка элементов под текущий размер холста. */
+  /**
+   * Раскладка сцены — см. ЗАКОН РАСКЛАДКИ над константами выше:
+   * позиции от центра, дрейф с заморозкой на широких, размеры НЕ зависят
+   * от экрана. Здесь НЕТ долей ширины (w * 0.24 и т.п.) — только якоря.
+   */
   private layout(): void {
     const w = this.app.screen.width;
     const h = this.app.screen.height;
@@ -304,52 +358,78 @@ export class GameView {
       this.bg.height = h;
     }
 
-    if (this.house) {
-      this.house.x = w * 0.5;
-      this.house.y = h * 0.34;
-    }
+    // Мир: фон — cover-обрезка от эталона (ресайз не перестраивает, а режет),
+    // растительность — за домом, в координатах сцены (масштаб 1: не зумится).
+    this.world.layoutBackground(w, h);
 
-    if (this.car) {
-      this.car.x = w * 0.24;
-      this.car.y = h * 0.78;
-    }
+    const extra = Math.max(0, w - SCENE_REF_WIDTH);
+    const drift = Math.min(DRIFT_MAX_TOTAL, extra * DRIFT_GAIN);
+
+    const cx = w * 0.5;
+    // Вертикальная ПОСАДКА: центр композиции смещается в свободную полосу между
+    // HUD (сверху, ~150px с тремя рядами) и таб-баром (снизу ~110px). Только
+    // позиция — размеры объектов от этого не зависят (железное правило 1).
+    const topFree = Math.min(170, h * 0.24);
+    const bottomFree = 120;
+    const usable = Math.max(120, h - topFree - bottomFree);
+    const cy = topFree + usable * 0.46;
+
+    const place = (item: Container | null, a: SceneAnchor): void => {
+      if (!item) return;
+      // Размер — КОНСТАНТА плейсхолдера: экран влияет только на положение.
+      item.scale.set(a.scale);
+      // На узких экранах (уже эталона) dx схлопывается пропорционально — иначе
+      // крайние объекты уходят за край. Это изменение ПОЗИЦИИ (разрешено),
+      // размеры не трогаем. На широких — фактор 1, работает только дрейф.
+      const squeeze = Math.min(1, w / SCENE_REF_WIDTH);
+      const effDx = a.dx * squeeze;
+      // Дрейф: доля якоря от самого крайнего, в сторону своего смещения.
+      const driftShare = Math.abs(a.dx) / SCENE_MAX_DX;
+      item.x = cx + effDx + Math.sign(a.dx) * drift * driftShare;
+      item.y = cy + a.dy;
+    };
+
+    place(this.house, HOUSE_ANCHOR);
+    place(this.yard, YARD_ANCHOR);
+    place(this.car, CAR_ANCHOR);
+    place(this.workplace.get('furniture') ?? null, FURNITURE_ANCHOR);
+    place(this.workplace.get('pc') ?? null, PC_ANCHOR);
+    place(this.workplace.get('tech') ?? null, TECH_ANCHOR);
+    place(this.character, CHAR_ANCHOR);
+
+    // Растительность следует за домом (та же система координат, что у сцены),
+    // масштаб 1 — экранные размеры прямоугольника-заглушки константны.
+    this.world.layoutVegetation(
+      this.house?.x ?? cx,
+      (this.house?.y ?? cy) + 30,
+      1,
+    );
 
     if (this.character) {
-      this.charBaseX = w * 0.62;
-      this.charBaseY = h * 0.62;
-      this.character.x = this.charBaseX;
-      this.character.y = this.charBaseY;
-    }
-
-    // Двор — за домом (чуть больше и ниже).
-    if (this.yard) {
-      this.yard.x = this.house?.x ?? w * 0.5;
-      this.yard.y = (this.house?.y ?? h * 0.34) + 40;
-    }
-
-    // Рабочее место — нижний ряд; тачка поднята выше, чтобы не толкаться с техникой.
-    const wpY = h * 0.84;
-    if (this.car) {
-      this.car.x = w * 0.16;
-      this.car.y = h * 0.68;
-    }
-    if (this.workplace.size) {
-      // Порядок по ТЗ: стул → монитор → микрофон.
-      this.workplace.get('furniture')!.position.set(w * 0.26, wpY);
-      this.workplace.get('pc')!.position.set(w * 0.47, wpY - 8);
-      this.workplace.get('tech')!.position.set(w * 0.68, wpY);
+      this.charBaseX = this.character.x;
+      this.charBaseY = this.character.y;
+      this.charBaseScale = CHAR_ANCHOR.scale;
     }
 
     // Носимые следуют за персонажем (с учётом его idle-покачивания в update).
     this.syncWornPositions();
 
-    // Подписи стадий следуют за своими объектами.
-    this.stageLabels.get('house')?.position.set(this.house?.x ?? 0, (this.house?.y ?? 0) - 130);
-    this.stageLabels.get('car')?.position.set(this.car?.x ?? 0, (this.car?.y ?? 0) - 70);
-    this.stageLabels.get('bg')?.position.set(this.yard?.x ?? 0, (this.yard?.y ?? 0) - 105);
-    this.stageLabels.get('furniture')?.position.set(w * 0.26, wpY - 70);
-    this.stageLabels.get('pc')?.position.set(w * 0.47, wpY - 68);
-    this.stageLabels.get('tech')?.position.set(w * 0.68, wpY - 70);
+    // Подписи стадий следуют за своими объектами; офсеты константные — размеры
+    // (и подписей, и объектов) от экрана не зависят. Подписи дома/двора клампятся
+    // ниже HUD (topFree): на низких окнах иначе они прячутся под чип эпохи.
+    const labelTopLimit = topFree + 34;
+    this.stageLabels.get('house')?.position.set(
+      this.house?.x ?? cx, Math.max((this.house?.y ?? cy) - 98, labelTopLimit));
+    this.stageLabels.get('car')?.position.set(
+      this.car?.x ?? 0, (this.car?.y ?? 0) - 70);
+    this.stageLabels.get('bg')?.position.set(
+      this.yard?.x ?? cx, Math.max((this.yard?.y ?? cy) - 70, labelTopLimit));
+    this.stageLabels.get('furniture')?.position.set(
+      this.workplace.get('furniture')?.x ?? 0, (this.workplace.get('furniture')?.y ?? 0) - 70);
+    this.stageLabels.get('pc')?.position.set(
+      this.workplace.get('pc')?.x ?? 0, (this.workplace.get('pc')?.y ?? 0) - 68);
+    this.stageLabels.get('tech')?.position.set(
+      this.workplace.get('tech')?.x ?? 0, (this.workplace.get('tech')?.y ?? 0) - 70);
   }
 
   /** Носимые держатся на персонаже (офсеты от его базовой точки). */
@@ -357,9 +437,31 @@ export class GameView {
     if (!this.character) return;
     const x = this.charBaseX;
     const y = this.charBaseY;
-    this.worn.get('watch')?.position.set(x + 30, y + 66);   // запястье
-    this.worn.get('face')?.position.set(x, y - 6);          // на голове
-    this.worn.get('clothes')?.position.set(x, y + 30);      // грудь
+    const s = this.charBaseScale;
+    const watch = this.worn.get('watch');
+    if (watch) {
+      watch.position.set(x + 30 * s, y + 66 * s); // запястье
+      watch.scale.set(s);
+    }
+    const face = this.worn.get('face');
+    if (face) {
+      face.position.set(x, y - 6 * s); // на голове
+      face.scale.set(s);
+    }
+    const clothes = this.worn.get('clothes');
+    if (clothes) {
+      clothes.position.set(x, y + 30 * s); // грудь
+      clothes.scale.set(s);
+    }
+  }
+
+  /**
+   * Применить стадию мира (эпоха фона + фаза растительности).
+   * Вызывается из main при 'world:changed' и один раз на старте.
+   */
+  applyWorldStage(era: number, phase: number): void {
+    this.world.applyStage(era, phase);
+    this.layout(); // новый фон может требовать cover-пересчёт
   }
 
   // ------------------------------------------------------------ тиры сцены
@@ -454,10 +556,10 @@ export class GameView {
   }
   // ----------------------------------------------------------------- тапы
 
-  /** Сквош-эффект персонажа при клике. */
+  /** Сквош-эффект персонажа при клике (относительно его базового масштаба). */
   private punchCharacter(): void {
     if (!this.character) return;
-    this.character.scale.set(1.16);
+    this.character.scale.set(this.charBaseScale * 1.16);
   }
 
   /** Всплывающий текст «+N$» в мировых координатах холста. */
@@ -495,10 +597,10 @@ export class GameView {
   private update(dt: number): void {
     this.time += dt;
 
-    // Плавное возвращение масштаба после тапа.
+    // Плавное возвращение масштаба после тапа (к базовому, а не к 1).
     if (this.character) {
       const s = this.character.scale.x;
-      const next = s + (1 - s) * Math.min(1, dt * 9);
+      const next = s + (this.charBaseScale - s) * Math.min(1, dt * 9);
       this.character.scale.set(next);
 
       // Idle-анимация: лёгкое покачивание.

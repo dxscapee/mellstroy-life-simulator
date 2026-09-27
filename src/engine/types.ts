@@ -96,4 +96,6 @@ export type GameEventMap = {
   'subscribers:ready': undefined;
   /** Уровни объектов изменены массово (applyLevels/загрузка сейва) — сцене надо перечитать всё. */
   'objects:changed': undefined;
+  /** Период мира сменился (порог по totalEarned): фон/растительность + чип эпохи. */
+  'world:changed': { period: number; era: number };
 };

@@ -301,7 +301,6 @@ export class ObjectSheet {
 
   /** Формирует текст о вкладе объекта в доходы (активный/пассивный). */
   private getIncomeInfo(def: ObjectDef): string {
-    const state = this.game.state;
     const tier = Math.floor(def.currentLevel / gameConfig.tiers.levelsPerTier);
     const perTier = gameConfig.tiers.weightMultiplierPerTier * gameConfig.tiers.weightDecayPerTier;
     const tierMult = Math.pow(perTier, tier);

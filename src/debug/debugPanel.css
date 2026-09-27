@@ -57,6 +57,15 @@
   margin: 0 0 2px;
 }
 
+/* Подписи секций («Баланс», «Per second») над рядами. */
+#debug-panel .section-label {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #9aa5b1;
+  margin: 2px 2px -2px;
+}
+
 #debug-panel button {
   padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -76,12 +85,80 @@
   gap: 6px;
 }
 
+/* В рядах с полем: поле шире, кнопки-множители и $ — уже. */
+#debug-panel .row input {
+  flex: 1.6;
+}
+
 #debug-panel .row button {
   flex: 1;
 }
 
+#debug-panel .row button:has(+ button) {
+  flex: 0.8;
+}
+
+#debug-panel .row input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-family: monospace;
+  font-size: 12.5px;
+}
+
+#debug-panel .row input:focus {
+  outline: 1px solid #f1c40f;
+}
+
 #debug-panel .debug-speed-active {
   outline: 2px solid #f1c40f;
+}
+
+#debug-panel button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- встроенные логи панели ---------- */
+
+#debug-panel .log-list {
+  margin-top: 4px;
+  min-height: 96px;
+  max-height: 150px;
+  overflow-y: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  padding-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #9aa5b1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+#debug-panel .log-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#debug-panel .log-line.ok {
+  color: #2ecc71;
+}
+
+#debug-panel .log-line.warn {
+  color: #f1c40f;
+}
+
+/* Инлайн-фидбек действия: зелёная вспышка на 2с. */
+#debug-panel button.flash-ok {
+  background: var(--accent, #2ecc71);
+  border-color: var(--accent, #2ecc71);
+  color: #062b14;
 }
 
 #debug-panel button.danger {

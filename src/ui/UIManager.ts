@@ -1,8 +1,10 @@
 import { events } from '@engine/eventBus';
 import { formatCount, formatMoney, formatIncomePerSecond } from '@engine/format';
+import { WORLD_ERA_NAMES, WORLD_VEGETATION_NAMES } from '@data/worldStages';
 import type { Game } from '@engine/Game';
 import { Modal } from './OfflineModal';
 import { ObjectSheet } from './ObjectSheet';
+import { EraPopup } from './EraPopup';
 
 /**
  * Композитор HTML-слоя: создаёт HUD, выноску и модалку, подписывает их
@@ -23,6 +25,12 @@ export class UIManager {
   private subBarFill: HTMLElement;
   private subCountEl: HTMLElement;
   private subGoalEl: HTMLElement;
+  /** Чип эпохи мира: имя эпохи + прогресс к следующей. Клик — галерея. */
+  private eraChip: HTMLButtonElement;
+  private eraNameEl: HTMLElement;
+  private eraNextEl: HTMLElement;
+  private eraPopup: EraPopup;
+  private lastEraKey: string | null = null;
   private lastBalanceRendered: string | null = null;
   private lastPassiveRendered: string | null = null;
   private lastActiveRendered: string | null = null;
@@ -76,6 +84,30 @@ export class UIManager {
     hud.appendChild(this.subChip);
     uiRoot.appendChild(hud);
 
+    // ---------- чип эпохи мира (пятая ячейка HUD, под сеткой 2×2) ----------
+    // Клик = попап-галерея стадий. Смена эпохи приходит событием world:changed.
+    this.eraChip = document.createElement('button');
+    this.eraChip.className = 'era-chip js-interactive';
+    this.eraChip.type = 'button';
+
+    const eraIcon = document.createElement('span');
+    eraIcon.className = 'era-icon';
+    eraIcon.textContent = '🌍';
+
+    this.eraNameEl = document.createElement('span');
+    this.eraNameEl.className = 'era-name';
+    this.eraNameEl.textContent = WORLD_ERA_NAMES[0];
+
+    this.eraNextEl = document.createElement('span');
+    this.eraNextEl.className = 'era-next';
+    this.eraNextEl.textContent = '';
+
+    this.eraChip.append(eraIcon, this.eraNameEl, this.eraNextEl);
+    this.eraChip.addEventListener('click', () => this.eraPopup.toggle());
+    // Пятая ячейка ВНУТРИ сетки HUD (grid-column 1/-1 — третья строка блока).
+    this.eraPopup = new EraPopup(uiRoot, game.worldWatch);
+    hud.appendChild(this.eraChip);
+
     this.sheet = new ObjectSheet(uiRoot, game);
     this.modal = new Modal(uiRoot);
 
@@ -89,12 +121,23 @@ export class UIManager {
       events.on('object:levelup', () => this.forceHud()),
       events.on('subscribers:changed', () => this.renderSubscribers()),
       events.on('subscribers:ready', () => this.renderSubscribers()),
+      // Смена периода мира: чип мигает, подпись обновляется; попап обновит сам себя.
+      events.on('world:changed', () => {
+        this.lastEraKey = null;
+        this.renderEraChip();
+        this.eraChip.classList.remove('evolved');
+        void this.eraChip.offsetWidth; // рестарт CSS-анимации
+        this.eraChip.classList.add('evolved');
+      }),
       // Полный сброс (дебаг): HUD и подписчики могут не измениться по ключам — рендерим принудительно.
       events.on('game:reset', () => {
         this.lastSubKey = null;
+        this.lastEraKey = null;
         this.forceHud();
       }),
     );
+
+    this.renderEraChip();
   }
 
   private onSubChipClick(): void {
@@ -123,8 +166,12 @@ export class UIManager {
     // Троттлинг HUD: перерисовка баланса ~4 раза/сек.
     // Шторка обновляется только пока открыта — в закрытом состоянии её не видно.
     this.hudThrottle += 1;
-    if (this.hudThrottle % 15 === 0) this.renderHud();
+    if (this.hudThrottle % 15 === 0) {
+      this.renderHud();
+      this.renderEraChip();
+    }
     if (this.sheet.isOpen()) this.sheet.refresh();
+    if (this.eraPopup.isOpenState()) this.eraPopup.refresh();
   }
 
   private forceHud(): void {
@@ -180,6 +227,25 @@ export class UIManager {
     }
     this.subBarFill.style.width = `${pct}%`;
     this.subChip.classList.toggle('claimable', s.claimable);
+  }
+
+  /** Чип эпохи: «имя эпохи · фаза растительности · N% к следующей». */
+  private renderEraChip(): void {
+    const s = this.game.worldWatch.stage;
+    const vegName = WORLD_VEGETATION_NAMES[
+      Math.min(s.period, WORLD_VEGETATION_NAMES.length - 1)
+    ];
+    const pct = Math.floor(s.eraProgress * 100);
+    const nextLabel = s.period >= WORLD_VEGETATION_NAMES.length - 1
+      ? 'макс. эпоха'
+      : `далее ${WORLD_VEGETATION_NAMES[s.period + 1]} · ${pct}%`;
+
+    const key = `${s.period}|${pct}`;
+    if (key === this.lastEraKey) return;
+    this.lastEraKey = key;
+
+    this.eraNameEl.textContent = WORLD_ERA_NAMES[s.era];
+    this.eraNextEl.textContent = `${vegName} · ${nextLabel}`;
   }
 
   destroy(): void {
