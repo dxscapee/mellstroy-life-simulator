@@ -37,8 +37,8 @@ const TIER_STAGES: Partial<Record<ObjectId, readonly string[]>> = {
 
 const house: ObjectDef = {
   id: 'house', name: 'Дом', group: 'property', icon: '🏠',
-  startLevel: 1, costBase: $(75), costGrowth: 1.35,
-  aWeight: 0.03, pWeight: 0.15, maxLevel: 100,
+  startLevel: 1, costBase: $(75), costGrowth: 1.15,
+  aWeight: 0.05, pWeight: 0.25, maxLevel: 100,
   desc: 'Твой угл. Основной источник пассива.',
   tierNames: HOUSE_STAGES,
   currentLevel: 1,
@@ -46,8 +46,8 @@ const house: ObjectDef = {
 
 const car: ObjectDef = {
   id: 'car', name: 'Тачка', group: 'property', icon: '🚗',
-  startLevel: 0, costBase: $(100), costGrowth: 1.35,
-  aWeight: 0.04, pWeight: 0.12, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  aWeight: 0.06, pWeight: 0.20, maxLevel: 100,
   desc: 'Возит на съёмки: пассив капает стабильнее.',
   requires: 'house',
   tierNames: TIER_STAGES.car,
@@ -56,8 +56,8 @@ const car: ObjectDef = {
 
 const bg: ObjectDef = {
   id: 'bg', name: 'Двор', group: 'property', icon: '🌆',
-  startLevel: 0, costBase: $(100), costGrowth: 1.35,
-  aWeight: 0.02, pWeight: 0.10, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  aWeight: 0.04, pWeight: 0.18, maxLevel: 100,
   desc: 'Чем богаче фон, тем больше подписчиков.',
   requires: 'house',
   tierNames: TIER_STAGES.bg,
@@ -68,8 +68,8 @@ const bg: ObjectDef = {
 
 const watch: ObjectDef = {
   id: 'watch', name: 'Часы', group: 'outfit', icon: '⌚',
-  startLevel: 0, costBase: $(100), costGrowth: 1.35,
-  aWeight: 0.03, pWeight: 0.12, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  aWeight: 0.05, pWeight: 0.20, maxLevel: 100,
   desc: 'Статус на запястье: пассив капает бодрее.',
   requires: 'house',
   tierNames: TIER_STAGES.watch,
@@ -78,8 +78,8 @@ const watch: ObjectDef = {
 
 const face: ObjectDef = {
   id: 'face', name: 'Лицо', group: 'outfit', icon: '😎',
-  startLevel: 0, costBase: $(100), costGrowth: 1.35,
-  aWeight: 0.03, pWeight: 0.10, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  aWeight: 0.05, pWeight: 0.18, maxLevel: 100,
   desc: 'Улыбка решает: держит пассив на плаву.',
   requires: 'house',
   tierNames: TIER_STAGES.face,
@@ -88,8 +88,8 @@ const face: ObjectDef = {
 
 const clothes: ObjectDef = {
   id: 'clothes', name: 'Шмот', group: 'outfit', icon: '👕',
-  startLevel: 0, costBase: $(100), costGrowth: 1.35,
-  aWeight: 0.02, pWeight: 0.12, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  aWeight: 0.04, pWeight: 0.20, maxLevel: 100,
   desc: 'Брендовый лук: подписчики за стиль.',
   requires: 'house',
   tierNames: TIER_STAGES.clothes,
@@ -100,8 +100,8 @@ const clothes: ObjectDef = {
 
 const tech: ObjectDef = {
   id: 'tech', name: 'Микрофон', group: 'workplace', icon: '🎙️',
-  startLevel: 0, costBase: $(100), costGrowth: 1.35,
-  aWeight: 0.15, pWeight: 0.03, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  aWeight: 0.25, pWeight: 0.05, maxLevel: 100,
   desc: 'Голос решает: каждый тап жирнее.',
   requires: 'house',
   tierNames: TIER_STAGES.tech,
@@ -110,8 +110,8 @@ const tech: ObjectDef = {
 
 const pc: ObjectDef = {
   id: 'pc', name: 'Комп', group: 'workplace', icon: '🖥️',
-  startLevel: 0, costBase: $(100), costGrowth: 1.35,
-  aWeight: 0.20, pWeight: 0.03, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  aWeight: 0.35, pWeight: 0.05, maxLevel: 100,
   desc: 'Монтаж быстрее: тап бьёт сильнее.',
   requires: 'tech',
   tierNames: TIER_STAGES.pc,
@@ -120,8 +120,8 @@ const pc: ObjectDef = {
 
 const furniture: ObjectDef = {
   id: 'furniture', name: 'Мебель', group: 'workplace', icon: '🪑',
-  startLevel: 0, costBase: $(100), costGrowth: 1.35,
-  aWeight: 0.25, pWeight: 0.03, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  aWeight: 0.45, pWeight: 0.05, maxLevel: 100,
   desc: 'Комфортное место силы: максимум с тапа.',
   requires: 'tech',
   tierNames: TIER_STAGES.furniture,
@@ -132,27 +132,27 @@ const furniture: ObjectDef = {
 
 const charisma: ObjectDef = {
   id: 'charisma', name: 'Харизма', group: 'skills', icon: '🗣️',
-  startLevel: 0, costBase: $(100), costGrowth: 1.5,
-  aWeight: 0.5, pWeight: 0, maxLevel: 50,
-  desc: 'Каждый уровень: +50% к доходу за тап.',
+  startLevel: 0, costBase: $(500), costGrowth: 1.25,
+  aWeight: 0.8, pWeight: 0, maxLevel: 50,
+  desc: 'Каждый уровень: +80% к доходу за тап.',
   requires: 'pc',
   currentLevel: 0,
 };
 
 const emotion: ObjectDef = {
   id: 'emotion', name: 'Эмоциональность', group: 'skills', icon: '😤',
-  startLevel: 0, costBase: $(100), costGrowth: 1.5,
-  aWeight: 0.75, pWeight: 0, maxLevel: 50,
-  desc: 'Каждый уровень: +75% к доходу за тап.',
+  startLevel: 0, costBase: $(1000), costGrowth: 1.25,
+  aWeight: 1.2, pWeight: 0, maxLevel: 50,
+  desc: 'Каждый уровень: +120% к доходу за тап.',
   requires: 'charisma',
   currentLevel: 0,
 };
 
 const humor: ObjectDef = {
   id: 'humor', name: 'Юмор', group: 'skills', icon: '🤡',
-  startLevel: 0, costBase: $(100), costGrowth: 1.5,
-  aWeight: 1.0, pWeight: 0, maxLevel: 50,
-  desc: 'Каждый уровень: +100% к доходу за тап.',
+  startLevel: 0, costBase: $(2000), costGrowth: 1.25,
+  aWeight: 1.5, pWeight: 0, maxLevel: 50,
+  desc: 'Каждый уровень: +150% к доходу за тап.',
   requires: 'emotion',
   currentLevel: 0,
 };
