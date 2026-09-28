@@ -77,7 +77,6 @@ export class GameView {
   private worn = new Map<string, Container>();
   /** Подпись стадии над сценовым объектом (плейсхолдер вместо спрайтов). */
   private stageLabels = new Map<string, Text>();
-  private charBaseX = 0;
   private charBaseY = 0;
   /** Базовый масштаб персонажа (от него считаются squash-эффект и idle). */
   private charBaseScale = CHAR_ANCHOR.scale;
@@ -278,8 +277,9 @@ export class GameView {
   }
 
   /**
-   * Носимые плейсхолдеры на персонаже. addChild идёт ПОСЛЕ character,
-   * поэтому они рисуются поверх тела (см. layout: те же координаты + офсеты).
+   * Носимые плейсхолдеры — ДЕТИ персонажа: наследуют его позицию, масштаб
+   * и поворот, поэтому при idle-покачивании и squash-эффекте двигаются вместе
+   * с телом. Офсеты задаются один раз (локальные), синхронизация не нужна.
    */
   private buildWorn(): void {
     // Часы — на «запястье» (правый низ тела).
@@ -307,9 +307,15 @@ export class GameView {
     clothes.addChild(chain);
     this.worn.set('clothes', clothes);
 
+    // Офсеты — локальные, в координатах персонажа (его scale применит их сам).
+    this.worn.get('watch')?.position.set(30, 66); // запястье
+    this.worn.get('face')?.position.set(0, -6); // на голове
+    this.worn.get('clothes')?.position.set(0, 30); // грудь
+
+    // addChild ПОСЛЕ body/head → рисуются поверх частей тела.
     for (const item of this.worn.values()) {
       item.visible = false; // появляется после покупки
-      this.app.stage.addChild(item);
+      this.character?.addChild(item);
     }
   }
 
@@ -406,13 +412,9 @@ export class GameView {
     );
 
     if (this.character) {
-      this.charBaseX = this.character.x;
       this.charBaseY = this.character.y;
       this.charBaseScale = CHAR_ANCHOR.scale;
     }
-
-    // Носимые следуют за персонажем (с учётом его idle-покачивания в update).
-    this.syncWornPositions();
 
     // Подписи стадий следуют за своими объектами; офсеты константные — размеры
     // (и подписей, и объектов) от экрана не зависят. Подписи дома/двора клампятся
@@ -430,29 +432,6 @@ export class GameView {
       this.workplace.get('pc')?.x ?? 0, (this.workplace.get('pc')?.y ?? 0) - 68);
     this.stageLabels.get('tech')?.position.set(
       this.workplace.get('tech')?.x ?? 0, (this.workplace.get('tech')?.y ?? 0) - 70);
-  }
-
-  /** Носимые держатся на персонаже (офсеты от его базовой точки). */
-  private syncWornPositions(): void {
-    if (!this.character) return;
-    const x = this.charBaseX;
-    const y = this.charBaseY;
-    const s = this.charBaseScale;
-    const watch = this.worn.get('watch');
-    if (watch) {
-      watch.position.set(x + 30 * s, y + 66 * s); // запястье
-      watch.scale.set(s);
-    }
-    const face = this.worn.get('face');
-    if (face) {
-      face.position.set(x, y - 6 * s); // на голове
-      face.scale.set(s);
-    }
-    const clothes = this.worn.get('clothes');
-    if (clothes) {
-      clothes.position.set(x, y + 30 * s); // грудь
-      clothes.scale.set(s);
-    }
   }
 
   /**
@@ -603,10 +582,10 @@ export class GameView {
       const next = s + (this.charBaseScale - s) * Math.min(1, dt * 9);
       this.character.scale.set(next);
 
-      // Idle-анимация: лёгкое покачивание.
+      // Idle-анимация: лёгкое покачивание. Шмот — дети персонажа,
+      // наследуют y/rotation/scale автоматически (см. buildWorn).
       this.character.y = this.charBaseY + Math.sin(this.time * 2.2) * 7;
       this.character.rotation = Math.sin(this.time * 1.1) * 0.02;
-      this.syncWornPositions();
     }
 
     // Обновление всплывающих текстов.
