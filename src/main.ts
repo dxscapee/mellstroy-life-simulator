@@ -31,9 +31,9 @@ async function bootstrap(): Promise<void> {
   // Массовые изменения (applyLevels из дебага, загрузка сейва) — сцена перечитывает всё.
   events.on('objects:changed', refreshScene);
 
-  // Мир: стадии применяются и на старте, и при смене периода (фон/растительность).
-  view.applyWorldStage(game.worldWatch.stage.era, game.worldWatch.stage.period);
-  events.on('world:changed', ({ era, period }) => view.applyWorldStage(era, period));
+  // Мир: стадии применяются и на старте, и при смене периода (фон).
+  view.applyWorldStage(game.worldWatch.stage.era);
+  events.on('world:changed', ({ era }) => view.applyWorldStage(era));
 
   // 3) Слой UI.
   const ui = new UIManager(uiRoot, game);
