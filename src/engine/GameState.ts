@@ -292,7 +292,9 @@ export class GameState {
     // Сбрасываем уровни до стартовых, затем накатываем из сейва.
     for (const o of objectDefs) o.currentLevel = o.startLevel;
     if (snap.objects) {
-      for (const [id, level] of Object.entries(snap.objects)) {
+      for (const [rawId, level] of Object.entries(snap.objects)) {
+        // Миграция id: «Лицо» переименовано в «Причёску» — прогресс переносится.
+        const id = rawId === 'face' ? 'hair' : rawId;
         const def = objectById.get(id as ObjectDef['id']);
         if (def && Number.isFinite(level) && level > 0) {
           def.currentLevel = Math.min(Math.floor(level), def.maxLevel);

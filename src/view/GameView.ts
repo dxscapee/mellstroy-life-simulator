@@ -88,7 +88,7 @@ export class GameView {
   /** Плейсхолдеры остальных объектов: двор + рабочее место (рисуются при покупке). */
   private yard: Container | null = null;
   private workplace = new Map<string, Container>(); // tech | pc | furniture
-  /** Носимые плейсхолдеры на персонаже: watch | face | clothes (видны при покупке). */
+  /** Носимые плейсхолдеры на персонаже: watch | hair | clothes (видны при покупке). */
   private worn = new Map<string, Container>();
   /** Подпись стадии над сценовым объектом (плейсхолдер вместо спрайтов). */
   private stageLabels = new Map<string, Text>();
@@ -307,12 +307,14 @@ export class GameView {
     watch.addChild(wFace);
     this.worn.set('watch', watch);
 
-    // Лицо — «очки поверх» (тир 0 — просто улыбка-заглушка).
-    const face = new Container();
-    const fSmile = new Graphics();
-    fSmile.arc(0, 0, 14, 0.35, Math.PI - 0.35).stroke({ width: 4, color: 0xb98a54 });
-    face.addChild(fSmile);
-    this.worn.set('face', face);
+    // Причёска — «поверх головы» (тир 0 — кудри-заглушка над кепкой).
+    const hair = new Container();
+    const hCurl = new Graphics();
+    hCurl.circle(-10, -46, 9).fill(0x5a3b26);
+    hCurl.circle(0, -52, 10).fill(0x5a3b26);
+    hCurl.circle(11, -46, 9).fill(0x5a3b26);
+    hair.addChild(hCurl);
+    this.worn.set('hair', hair);
 
     // Шмот — «цепь» на груди (видна поверх тела; толще — заметнее на зелёном).
     const clothes = new Container();
@@ -324,7 +326,7 @@ export class GameView {
 
     // Офсеты — локальные, в координатах персонажа (его scale применит их сам).
     this.worn.get('watch')?.position.set(30, 66); // запястье
-    this.worn.get('face')?.position.set(0, -6); // на голове
+    this.worn.get('hair')?.position.set(0, -6); // на голове
     this.worn.get('clothes')?.position.set(0, 30); // грудь
 
     // addChild ПОСЛЕ body/head → рисуются поверх частей тела.
@@ -539,7 +541,7 @@ export class GameView {
           break;
         }
         case 'watch':
-        case 'face':
+        case 'hair':
         case 'clothes': {
           const worn = this.worn.get(s.id);
           if (worn) {

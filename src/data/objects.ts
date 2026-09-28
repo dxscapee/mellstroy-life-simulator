@@ -29,7 +29,7 @@ const TIER_STAGES: Partial<Record<ObjectId, readonly string[]>> = {
   pc: ['Ноут', 'Монитор', 'Супер-ПК'],
   furniture: ['Табурет', 'Кресло', 'Трон'],
   watch: ['Браслет', 'Часы', 'Тайм-золото'],
-  face: ['Улыбка', 'Очки', 'Маска'],
+  hair: ['Кудри', 'Ирокез', 'Косички'],
   clothes: ['Футболка', 'Худи', 'Шуба'],
 };
 
@@ -76,13 +76,13 @@ const watch: ObjectDef = {
   currentLevel: 0,
 };
 
-const face: ObjectDef = {
-  id: 'face', name: 'Лицо', group: 'outfit', icon: '😎',
+const hair: ObjectDef = {
+  id: 'hair', name: 'Причёска', group: 'outfit', icon: '💇',
   startLevel: 0, costBase: $(100), costGrowth: 1.15,
   aWeight: 0.05, pWeight: 0.18, maxLevel: 100,
-  desc: 'Улыбка решает: держит пассив на плаву.',
+  desc: 'Причёска решает: подписчики за стиль.',
   requires: 'house',
-  tierNames: TIER_STAGES.face,
+  tierNames: TIER_STAGES.hair,
   currentLevel: 0,
 };
 
@@ -161,7 +161,7 @@ const humor: ObjectDef = {
 
 export const objectDefs: readonly ObjectDef[] = [
   house, car, bg,
-  watch, face, clothes,
+  watch, hair, clothes,
   furniture, pc, tech, // порядок карточек = порядку на сцене: стул → монитор → микрофон
   charisma, emotion, humor,
 ];

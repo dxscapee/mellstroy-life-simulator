@@ -28,10 +28,16 @@ let speedButtons: HTMLButtonElement[] = [];
 let logListEl: HTMLElement | null = null;
 let undoBtn: HTMLButtonElement | null = null;
 
+/** Глубина истории логов панели (строк). */
+const LOG_HISTORY = 200;
+/** Ожидает маркер разрыва истории (после сброса) — ставится первым логом. */
+let wrapPending = false;
+
 /** Отменяемое действие: подпись + замыкание отката. */
 type DebugAction = { label: string; undo: () => void };
 const undoStack: DebugAction[] = [];
-const UNDO_LIMIT = 25;
+/** Глубина отката: максимум 10 последних действий (LIFO, по одному за нажатие). */
+const UNDO_LIMIT = 10;
 
 export function setupDebugPanel(game: Game): void {
   if (document.getElementById(PANEL_ID)) return;
@@ -89,7 +95,20 @@ export function setupDebugPanel(game: Game): void {
     log(`Тап форсирован: ${formatNumber(amount)}$/клик (повторный $ — снять)`, 'ok');
   });
   tapOverrideBtn.title = 'Вкл/выкл форс тапа';
-  tapRow.append(tapInput, ...mkMultButtons(tapInput), tapOverrideBtn);
+
+  // Живое применение форса: пока он активен, правка поля или ×10/×100 сразу
+  // меняет форс — повторное «$» не нужно. Некорректный ввод игнорируется тихо
+  // (форс остаётся прежним), итог логируем на change (blur/Enter), а не на каждый символ.
+  const applyLiveTapForce = (amount: Decimal | null): void => {
+    if (amount && game.state.isTapOverridden()) game.state.setTapOverride(amount);
+  };
+  tapInput.addEventListener('input', () => applyLiveTapForce(parseDebugAmount(tapInput.value)));
+  tapInput.addEventListener('change', () => {
+    if (!game.state.isTapOverridden()) return;
+    const amount = parseDebugAmount(tapInput.value);
+    if (amount) log(`Тап форсирован: ${formatNumber(amount)}$/клик`, 'ok');
+  });
+  tapRow.append(tapInput, ...mkMultButtons(tapInput, applyLiveTapForce), tapOverrideBtn);
 
   // ============ Отменить (полная ширина) ============
   undoBtn = mkBtn('↩ Отменить', () => {
@@ -160,6 +179,7 @@ export function setupDebugPanel(game: Game): void {
     tapOverrideBtn.classList.remove('active-forced');
     undoStack.length = 0; // после сброса откатывать нечего
     refreshUndoButton();
+    wrapPending = true; // следующий лог отделит историю до сброса
     log('Сейв сброшен', 'warn');
   });
 
@@ -196,8 +216,15 @@ export function setupDebugPanel(game: Game): void {
 
 // -------------------------------------------------------------- действия
 
-/** Кнопки ×10/×100 для конкретного поля: умножают его значение на месте. */
-function mkMultButtons(input: HTMLInputElement): HTMLButtonElement[] {
+/**
+ * Кнопки ×10/×100 для конкретного поля: умножают его значение на месте.
+ * onAfterChange — необязательный хук live-применения (форс тапа использует его,
+ * чтобы множители сразу обновляли активный форс без повторного «$»).
+ */
+function mkMultButtons(
+  input: HTMLInputElement,
+  onAfterChange?: (next: Decimal) => void,
+): HTMLButtonElement[] {
   return [10, 100].map((mult) =>
     mkBtn(`×${mult}`, () => {
       const current = parseDebugAmount(input.value);
@@ -207,6 +234,7 @@ function mkMultButtons(input: HTMLInputElement): HTMLButtonElement[] {
       }
       const next = current.mul(mult);
       input.value = formatNumber(next); // человекочитаемый вид: 10M, 500M…
+      onAfterChange?.(next);
       log(`Сумма ×${mult}: ${formatNumber(next)}$`);
     }),
   );
@@ -231,6 +259,18 @@ function refreshUndoButton(): void {
 /** Лог панели: строка в списке + дубль в консоль (единая точка). */
 function log(text: string, cls: 'info' | 'ok' | 'warn' = 'info'): void {
   if (logListEl) {
+    // После сброса — маркер: всё, что выше, — история до сброса (приглушена CSS).
+    if (wrapPending) {
+      wrapPending = false;
+      const marker = document.createElement('div');
+      marker.className = 'log-wrap-marker';
+      marker.textContent = '— история до сброса —';
+      logListEl.appendChild(marker);
+      if (logListEl.childElementCount > LOG_HISTORY + 1) logListEl.firstChild?.remove();
+    }
+    // Прилипание к низу: автоскролл только если читатель и так у низа —
+    // прокрутил историю вверх, чтобы почитать — новые строки его не дёргают.
+    const stick = logListEl.scrollHeight - logListEl.scrollTop - logListEl.clientHeight < 24;
     const line = document.createElement('div');
     line.className = `log-line ${cls}`;
     const t = new Date();
@@ -238,10 +278,11 @@ function log(text: string, cls: 'info' | 'ok' | 'warn' = 'info'): void {
     const mm = `${t.getMinutes()}`.padStart(2, '0');
     const ss = `${t.getSeconds()}`.padStart(2, '0');
     line.textContent = `${hh}:${mm}:${ss}  ${text}`;
-    logListEl.prepend(line); // новые сверху — автоскролл не нужен
-    while (logListEl.childElementCount > 60) {
-      logListEl.lastChild?.remove();
+    logListEl.appendChild(line); // новые снизу, как в консоли — историю листаем вверх
+    while (logListEl.childElementCount > LOG_HISTORY) {
+      logListEl.firstChild?.remove();
     }
+    if (stick) logListEl.scrollTop = logListEl.scrollHeight;
   }
   if (cls === 'warn') console.warn(`[Debug] ${text}`);
   else console.info(`[Debug] ${text}`);

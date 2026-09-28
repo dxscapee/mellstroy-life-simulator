@@ -1,10 +1,14 @@
 import { events } from '@engine/eventBus';
 import { formatCount, formatMoney, formatIncomePerSecond } from '@engine/format';
 import { WORLD_ERA_NAMES, WORLD_VEGETATION_NAMES } from '@data/worldStages';
+import { worldProgressFrac } from '@engine/WorldProgress';
 import type { Game } from '@engine/Game';
 import { Modal } from './OfflineModal';
 import { ObjectSheet } from './ObjectSheet';
 import { EraPopup } from './EraPopup';
+
+/** Геометрия кольца прогресса мира (viewBox 60×60). */
+const WORLD_RING_R = 26;
 
 /**
  * Композитор HTML-слоя: создаёт HUD, выноску и модалку, подписывает их
@@ -31,17 +35,27 @@ export class UIManager {
   private eraNextEl: HTMLElement;
   private eraPopup: EraPopup;
   private lastEraKey: string | null = null;
+  /** Кольцо прогресса мира (слева сверху) + его SVG-дуга и % внутри. */
+  private worldRing: HTMLButtonElement;
+  private worldRingFg: SVGCircleElement;
+  private worldRingPct: HTMLElement;
+  private lastWorldPct = -1;
+  private readonly worldRingC: number;
+  /** Кнопка настроек (пока заглушка — сюда лягут графика/звук). */
+  private settingsBtn: HTMLButtonElement;
   private lastBalanceRendered: string | null = null;
   private lastPassiveRendered: string | null = null;
   private lastActiveRendered: string | null = null;
   private lastSubKey: string | null = null;
   private hudThrottle = 0;
+  private worldThrottle = 0;
   private unsubscribers: Array<() => void> = [];
 
   constructor(
     uiRoot: HTMLElement,
     private readonly game: Game,
   ) {
+    this.worldRingC = 2 * Math.PI * WORLD_RING_R;
     // ---------- HUD: центральный блок 2×2 ----------
     const hud = document.createElement('header');
     hud.className = 'hud-top';
@@ -84,6 +98,55 @@ export class UIManager {
     hud.appendChild(this.subChip);
     uiRoot.appendChild(hud);
 
+    // ---------- кольцо прогресса мира (слева от HUD, по мокапу владельца) ----------
+    // Круговая SVG-шкала: заполняется по ходу текущего периода мира, % внутри.
+    // Обновление ~12 раз/с (отдельный троттлинг, чаще HUD) от живой дроби
+    // worldProgressFrac(totalEarned) — кэш WorldWatch «заморожен» между сменами.
+    this.worldRing = document.createElement('button');
+    this.worldRing.className = 'world-ring js-interactive';
+    this.worldRing.type = 'button';
+    this.worldRing.title = 'Прогресс эпохи мира';
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const ringSvg = document.createElementNS(NS, 'svg');
+    ringSvg.setAttribute('viewBox', '0 0 60 60');
+    ringSvg.classList.add('world-ring-svg');
+    const ringBg = document.createElementNS(NS, 'circle');
+    ringBg.setAttribute('cx', '30');
+    ringBg.setAttribute('cy', '30');
+    ringBg.setAttribute('r', String(WORLD_RING_R));
+    ringBg.classList.add('world-ring-bg');
+    this.worldRingFg = document.createElementNS(NS, 'circle');
+    this.worldRingFg.setAttribute('cx', '30');
+    this.worldRingFg.setAttribute('cy', '30');
+    this.worldRingFg.setAttribute('r', String(WORLD_RING_R));
+    this.worldRingFg.classList.add('world-ring-fg');
+    this.worldRingFg.style.strokeDasharray = String(this.worldRingC);
+    this.worldRingFg.style.strokeDashoffset = String(this.worldRingC);
+    ringSvg.append(ringBg, this.worldRingFg);
+
+    this.worldRingPct = document.createElement('span');
+    this.worldRingPct.className = 'world-ring-pct';
+    this.worldRingPct.textContent = '0%';
+
+    this.worldRing.append(ringSvg, this.worldRingPct);
+    // Окно кольца — прежний попап-галерея эпох (продумать функционал позже,
+    // по ТЗ владельца «может остаться прежней»).
+    this.worldRing.addEventListener('click', () => this.eraPopup.toggle());
+    uiRoot.appendChild(this.worldRing);
+
+    // ---------- кнопка настроек (справа сверху, заглушка под будущий функционал) ----------
+    this.settingsBtn = document.createElement('button');
+    this.settingsBtn.className = 'settings-btn js-interactive';
+    this.settingsBtn.type = 'button';
+    this.settingsBtn.title = 'Настройки';
+    this.settingsBtn.setAttribute('aria-label', 'Настройки');
+    this.settingsBtn.textContent = '⚙';
+    this.settingsBtn.addEventListener('click', () => {
+      // Пока пусто: здесь откроется панель настроек (графика/звук и т.д.).
+    });
+    uiRoot.appendChild(this.settingsBtn);
+
     // ---------- чип эпохи мира (пятая ячейка HUD, под сеткой 2×2) ----------
     // Клик = попап-галерея стадий. Смена эпохи приходит событием world:changed.
     this.eraChip = document.createElement('button');
@@ -113,6 +176,7 @@ export class UIManager {
 
     this.renderHud();
     this.renderSubscribers(true);
+    this.renderWorldRing();
 
     // ---------- подписки ----------
     this.unsubscribers.push(
@@ -133,7 +197,9 @@ export class UIManager {
       events.on('game:reset', () => {
         this.lastSubKey = null;
         this.lastEraKey = null;
+        this.lastWorldPct = -1;
         this.forceHud();
+        this.renderWorldRing();
       }),
     );
 
@@ -170,6 +236,10 @@ export class UIManager {
       this.renderHud();
       this.renderEraChip();
     }
+    // Кольцо прогресса мира — чаще HUD (~12 раз/с): владелец хочет заметного
+    // живого хода процента. Пишем в DOM только при смене целого %.
+    this.worldThrottle += 1;
+    if (this.worldThrottle % 5 === 0) this.renderWorldRing();
     if (this.sheet.isOpen()) this.sheet.refresh();
     if (this.eraPopup.isOpenState()) this.eraPopup.refresh();
   }
@@ -229,13 +299,28 @@ export class UIManager {
     this.subChip.classList.toggle('claimable', s.claimable);
   }
 
+  /** Кольцо прогресса: живая дробь периода мира, DOM — только при смене целого %. */
+  private renderWorldRing(): void {
+    const pct = Math.floor(worldProgressFrac(this.game.state.totalEarned) * 100);
+    if (pct === this.lastWorldPct) return;
+    this.lastWorldPct = pct;
+
+    // stroke-dashoffset: полный круг при pct=100. CSS transition — плавный ход.
+    this.worldRingFg.style.strokeDashoffset = String(
+      this.worldRingC * (1 - pct / 100),
+    );
+    this.worldRingPct.textContent = `${pct}%`;
+  }
+
   /** Чип эпохи: «имя эпохи · фаза растительности · N% к следующей». */
   private renderEraChip(): void {
     const s = this.game.worldWatch.stage;
     const vegName = WORLD_VEGETATION_NAMES[
       Math.min(s.period, WORLD_VEGETATION_NAMES.length - 1)
     ];
-    const pct = Math.floor(s.eraProgress * 100);
+    // Живая дробь периода (кэш WorldWatch заморожен между сменами) —
+    // текст чипа ходит синхронно с кольцом слева.
+    const pct = Math.floor(worldProgressFrac(this.game.state.totalEarned) * 100);
     const nextLabel = s.period >= WORLD_VEGETATION_NAMES.length - 1
       ? 'макс. эпоха'
       : `далее ${WORLD_VEGETATION_NAMES[s.period + 1]} · ${pct}%`;

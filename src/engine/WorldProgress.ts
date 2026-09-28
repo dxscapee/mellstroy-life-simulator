@@ -41,6 +41,20 @@ export function calcWorldStage(totalEarned: Decimal): WorldStage {
 }
 
 /**
+ * ЖИВАЯ дробь прогресса внутри текущего периода (0..1) без аллокации объекта
+ * стадии. Отличие от calcWorldStage: WorldWatch кэширует stage на весь период,
+ * поэтому его eraProgress «заморожен» между сменами периода — для часто
+ * обновляемого кольца прогресса в HUD считаем дробь каждый раз заново
+ * (только примитивы, вызывается троттлингом ~12 раз/с, не в кадре).
+ */
+export function worldProgressFrac(totalEarned: Decimal): number {
+  const log = Math.max(0, totalEarned.log10());
+  const raw = log / WORLD_EXP_STEP;
+  if (Math.floor(raw) >= LAST_PERIOD) return 1;
+  return Math.min(1, Math.max(0, raw - Math.floor(raw)));
+}
+
+/**
  * Наблюдатель стадии: кэширует последний WorldStage, аллоцирует новый объект
  * ТОЛЬКО при смене периода. UI подписывается на 'world:changed' и читает
  * .stage — в тике достаточно сравнить period (примитив) без аллокаций.

@@ -3,7 +3,7 @@
 
 .debug-corner-dot {
   position: fixed;
-  top: 8px;
+  top: 60px; /* ниже кнопки настроек HUD (44px + 8px отступ) */
   right: 8px;
   width: 12px;
   height: 12px;
@@ -35,6 +35,9 @@
   z-index: 9999;
   pointer-events: auto;
   font-family: monospace;
+  /* Скролл внутри панели не должен триггерить жесты страницы (touch-action: manipulation на body). */
+  touch-action: pan-y;
+  max-height: calc(100dvh - 56px);
 }
 
 /* Узкие экраны: панель компактнее, чтобы не налезала на HUD 420px. */
@@ -127,11 +130,15 @@
 
 #debug-panel .log-list {
   margin-top: 4px;
+  flex: 1;
   min-height: 96px;
-  max-height: 150px;
+  max-height: 300px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  box-sizing: border-box;
   border-top: 1px solid rgba(255, 255, 255, 0.15);
-  padding-top: 4px;
+  padding: 4px 4px 6px 0;
   font-size: 11px;
   line-height: 1.5;
   color: #9aa5b1;
@@ -141,9 +148,30 @@
 }
 
 #debug-panel .log-line {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Перенос длинных строк вместо обрезки — история читается целиком. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#debug-panel .log-wrap-marker {
+  color: #566270;
+  font-style: italic;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.2);
+  margin: 3px 0 2px;
+  padding-bottom: 2px;
+}
+
+/* Строки истории до сброса приглушены, свежие — виднее. */
+#debug-panel .log-list .log-wrap-start {
+  color: #566270;
+}
+
+#debug-panel .log-list .log-wrap-start.log-line.ok {
+  color: #1f7a46;
+}
+
+#debug-panel .log-list .log-wrap-start.log-line.warn {
+  color: #8a6d1a;
 }
 
 #debug-panel .log-line.ok {

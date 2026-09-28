@@ -7,10 +7,12 @@ import type { ObjectDef, ObjectGroup } from '@engine/types';
 
 interface CardRefs {
   root: HTMLElement;
-  /** Прогресс-бар эволюции: заполнение + подпись «ур. 7/10 · Стадия». */
+  /** Имя объекта: на уровне 0 — название, после покупки — стадия тира («Ноут», «Супер-ПК»). */
+  nameEl: HTMLElement;
+  /** Прогресс-бар эволюции: заполнение + подпись «ур. 7». */
   barFillEl: HTMLElement;
   barLabelEl: HTMLElement;
-  /** Компактный вклад в доход справа от имени: «+58$/т +0.05$/с». */
+  /** ОБЩИЙ вклад объекта в доход: «+58$/т +0.05$/с» (строка под баром). */
   incomeEl: HTMLElement;
   buyBtn: HTMLButtonElement;
   def: ObjectDef;
@@ -26,9 +28,11 @@ interface CardRefs {
  * Выноска объектов по группам-вкладкам. DOM строится один раз из data/objects.ts,
  * дальше обновляются только динамические части.
  *
- * Схема карточки (по ТЗ): [иконка + имя] [прогресс-бар до эволюции] [кнопка].
- * Каждые tiers.levelsPerTier покупок объект ЭВОЛЮЦИОНИРУЕТ: новая моделька на
- * сцене и название стадии. Прогресс-бар показывает путь до следующей эволюции.
+ * Схема карточки (по ТЗ): [иконка] [имя/стадия] [бар] [нижняя строка: ур. N + вклад] [кнопка].
+ * Имя объекта после покупки заменяется НАЗВАНИЕМ СТАДИИ тира («Ноут» → «Монитор»);
+ * уровень живёт в подписи под баром, рядом — ОБЩИЙ вклад объекта в доход
+ * (не дельта следующего уровня). Каждые tiers.levelsPerTier покупок объект
+ * ЭВОЛЮЦИОНИРУЕТ: новая моделька на сцене и название стадии.
  *
  * Окно — отдельная выноска над таб-баром (НЕ его продолжение), по центру,
  * фиксированной ширины (не растягивается на широких экранах).
@@ -139,21 +143,10 @@ export class ObjectSheet {
     const info = document.createElement('div');
     info.className = 'card-info';
 
-    // Верхняя строка: имя слева (схлопывается с многоточием) + вклад в доход
-    // справа в компактной форме («т» = за тап, «с» = в секунду) — строка
-    // гарантированно входит в карточку на любом экране.
-    const top = document.createElement('div');
-    top.className = 'card-top';
-
+    // Имя объекта. После покупки показываем стадию тира (обновляется в renderLevelDependent).
     const name = document.createElement('div');
     name.className = 'upgrade-name';
     name.textContent = def.name;
-
-    const income = document.createElement('span');
-    income.className = 'card-income';
-    income.title = 'т — за тап, с — в секунду';
-
-    top.append(name, income);
 
     const bar = document.createElement('div');
     bar.className = 'card-progress';
@@ -165,11 +158,20 @@ export class ObjectSheet {
     barFill.className = 'progress-fill';
     barTrack.appendChild(barFill);
 
+    // Нижняя строка под баром: уровень слева + общий вклад в доход справа.
+    const barBottom = document.createElement('div');
+    barBottom.className = 'card-bottom';
+
     const barLabel = document.createElement('div');
     barLabel.className = 'progress-label';
 
-    bar.append(barTrack, barLabel);
-    info.append(top, bar);
+    const income = document.createElement('span');
+    income.className = 'card-income';
+    income.title = 'т — за тап, с — в секунду';
+
+    barBottom.append(barLabel, income);
+    bar.append(barTrack, barBottom);
+    info.append(name, bar);
 
     // ---------- правая часть: кнопка покупки ----------
     const buyBtn = document.createElement('button');
@@ -182,7 +184,7 @@ export class ObjectSheet {
     root.append(icon, info, buyBtn);
 
     const card: CardRefs = {
-      root, barFillEl: barFill, barLabelEl: barLabel, incomeEl: income, buyBtn, def,
+      root, nameEl: name, barFillEl: barFill, barLabelEl: barLabel, incomeEl: income, buyBtn, def,
       shownLevel: -1, shownAffordable: false, shownUnlocked: true,
       cachedCost: this.game.state.getUpgradeCost(def),
     };
@@ -272,15 +274,20 @@ export class ObjectSheet {
     }
   }
 
-  /** Всё, что зависит от уровня/анлока: бар, подписи, кнопка. */
+  /** Всё, что зависит от уровня/анлока: имя-стадия, бар, подписи, кнопка. */
   private renderLevelDependent(card: CardRefs, level: number, unlocked: boolean): void {
     const def = card.def;
     const state = this.game.state;
+    const perTier = gameConfig.tiers.levelsPerTier;
 
-    // Формируем текст о вкладе в доходы
+    // Имя = стадия тира (только у купленного объекта); не куплен/заблокирован — название.
+    const stage = level > 0 ? def.tierNames?.[Math.floor(level / perTier)] : undefined;
+    card.nameEl.textContent = stage ?? def.name;
+
+    // Формируем текст об ОБЩЕМ вкладе объекта в доходы
     const incomeInfo = this.getIncomeInfo(def);
 
-    // ---------- прогресс-бар (короткая подпись: уровень + стадия) ----------
+    // ---------- прогресс-бар (короткая подпись: только уровень) ----------
     card.incomeEl.textContent = unlocked ? incomeInfo : '';
 
     if (!unlocked && def.requires) {
@@ -288,14 +295,11 @@ export class ObjectSheet {
       card.barLabelEl.textContent = `Нужен: ${getObject(def.requires).name}`;
     } else if (state.isMaxed(def)) {
       card.barFillEl.style.width = '100%';
-      const stage = def.tierNames?.[Math.floor(level / gameConfig.tiers.levelsPerTier)];
-      card.barLabelEl.textContent = stage ? `ур. ${level} · ${stage}` : 'MAX';
+      card.barLabelEl.textContent = def.tierNames ? `ур. ${level}` : 'MAX';
     } else if (level > 0) {
-      const perTier = gameConfig.tiers.levelsPerTier;
       const inTier = level % perTier;
       card.barFillEl.style.width = `${(inTier / perTier) * 100}%`;
-      const stage = def.tierNames?.[Math.floor(level / perTier)];
-      card.barLabelEl.textContent = stage ? `ур. ${level} · ${stage}` : `ур. ${level}`;
+      card.barLabelEl.textContent = `ур. ${level}`;
     } else {
       card.barFillEl.style.width = '0%';
       card.barLabelEl.textContent = 'Не куплено';
@@ -314,24 +318,29 @@ export class ObjectSheet {
     }
   }
 
-  /** Формирует текст о вкладе объекта в доходы (активный/пассивный). */
+  /**
+   * ОБЩИЙ вклад объекта в доходы на ТЕКУЩИЙ момент (не дельта следующего уровня):
+   * base × weight × уровень × tierMult — тот же член Σ, что и в потоках GameState.
+   * «т» = за тап (активный), «с» = в секунду (пассивный).
+   */
   private getIncomeInfo(def: ObjectDef): string {
-    const tier = Math.floor(def.currentLevel / gameConfig.tiers.levelsPerTier);
+    const level = def.currentLevel;
+    if (level <= 0) return '';
+
+    const tier = Math.floor(level / gameConfig.tiers.levelsPerTier);
     const perTier = gameConfig.tiers.weightMultiplierPerTier * gameConfig.tiers.weightDecayPerTier;
     const tierMult = Math.pow(perTier, tier);
 
     const parts: string[] = [];
 
-    // Вклад следующего уровня в активный доход («т» = за тап).
     if (def.aWeight > 0) {
-      const contribution = gameConfig.moneyPerTap.mul(def.aWeight * tierMult);
-      parts.push(`+${formatMoney(contribution)}/т`);
+      const total = gameConfig.moneyPerTap.mul(def.aWeight * level * tierMult);
+      parts.push(`+${formatMoney(total)}/т`);
     }
 
-    // Вклад следующего уровня в пассивный доход («с» = в секунду).
     if (def.pWeight > 0) {
-      const contribution = gameConfig.passiveBase.mul(def.pWeight * tierMult);
-      parts.push(`+${formatMoney(contribution)}/с`);
+      const total = gameConfig.passiveBase.mul(def.pWeight * level * tierMult);
+      parts.push(`+${formatMoney(total)}/с`);
     }
 
     return parts.length > 0 ? parts.join(' ') : '';

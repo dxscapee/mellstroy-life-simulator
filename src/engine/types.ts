@@ -6,7 +6,7 @@ export type ObjectGroup = 'property' | 'outfit' | 'workplace' | 'skills';
 /** id всех прокачиваемых объектов игры. */
 export type ObjectId =
   | 'house' | 'car' | 'bg'
-  | 'watch' | 'face' | 'clothes'
+  | 'watch' | 'hair' | 'clothes'
   | 'tech' | 'pc' | 'furniture'
   | 'charisma' | 'emotion' | 'humor';
 

@@ -59,6 +59,86 @@ html, body, #app {
   pointer-events: auto; /* интерактив перехватывает клики */
 }
 
+/* ================= Кольцо прогресса мира (слева сверху) ================= */
+
+/* Кнопка-круг слева от HUD-блока. Клик-заглушка — как и у чипа, сработает,
+   когда владелец придумает функционал окна. */
+.world-ring {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top));
+  left: calc(10px + env(safe-area-inset-left));
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  z-index: 12;
+}
+
+.world-ring-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* Старт дуги сверху, как в мокапе владельца. */
+  transform: rotate(-90deg);
+}
+
+.world-ring-bg {
+  fill: none;
+  stroke: var(--bg-panel);
+  stroke-width: 5.5;
+}
+
+.world-ring-fg {
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 5.5;
+  stroke-linecap: round;
+  /* Обводка рисуется по длине окружности; offset = остаток.
+     Точная длина (dasharray/dashoffset) подставляется из TS inline-стилем. */
+  transition: stroke-dashoffset 0.25s ease-out;
+}
+
+.world-ring-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--danger);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+/* ================= Кнопка настроек (справа сверху) ================= */
+
+.settings-btn {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(10px + env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 21px;
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  z-index: 12;
+}
+
+.settings-btn:active {
+  transform: translateY(1px);
+}
+
 /* ================= HUD ================= */
 
 /*
@@ -78,6 +158,33 @@ html, body, #app {
   gap: 6px;
   padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
   pointer-events: none; /* ячейки денег не должны есть тапы по холсту */
+}
+
+/* Узкие экраны (портрет): HUD сжимается между кольцом (слева) и настройками
+   (справа). Виджеты тоже мельчают. Порог 584px = начало наезда HUD 420px
+   на кольцо 72px при чистом центрировании. */
+@media (max-width: 583px) {
+  .world-ring {
+    top: calc(24px + env(safe-area-inset-top));
+    width: 52px;
+    height: 52px;
+  }
+
+  .world-ring-pct {
+    font-size: 11px;
+  }
+
+  .settings-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+
+  .hud-top {
+    /* Центр доступной полосы [68 .. w-56]: сдвиг +6px, ширина 100%-124px. */
+    left: calc(50% + 6px);
+    width: min(calc(100% - 124px), 420px);
+  }
 }
 
 /* Ячейка-статистика: подпись сверху, значение снизу. */
@@ -543,10 +650,10 @@ button.sub-cell {
   min-width: 0;
 }
 
-/* Верхняя строка карточки: имя + вклад в доход. flex с min-width:0
-   гарантирует: что-то всегда схлопнется с многоточием, но НИКОГДА
-   не вылезет за карточку (главное требование «входит всегда»). */
-.card-top {
+/* Нижняя строка карточки (под баром): уровень + общий вклад в доход.
+   flex с min-width:0 гарантирует: что-то всегда схлопнется с многоточием,
+   но НИКОГДА не вылезет за карточку (главное требование «входит всегда»). */
+.card-bottom {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -565,7 +672,7 @@ button.sub-cell {
   min-width: 0;
 }
 
-/* Компактный вклад в доход справа от имени: «+58$/т +0.05$/с»
+/* Общий вклад в доход справа от уровня: «+58$/т +0.05$/с»
    (т — за тап, с — в секунду). flex-shrink: 0 — цифры не режутся. */
 .card-income {
   font-size: 11px;
