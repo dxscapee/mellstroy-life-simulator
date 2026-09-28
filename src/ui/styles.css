@@ -524,14 +524,14 @@ button.sub-cell {
 }
 
 .upgrade-icon {
-  width: 50px;
-  height: 50px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: 23px;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
+  border-radius: 10px;
   flex-shrink: 0;
 }
 
@@ -543,6 +543,17 @@ button.sub-cell {
   min-width: 0;
 }
 
+/* Верхняя строка карточки: имя + вклад в доход. flex с min-width:0
+   гарантирует: что-то всегда схлопнется с многоточием, но НИКОГДА
+   не вылезет за карточку (главное требование «входит всегда»). */
+.card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .upgrade-name {
   font-size: 15px;
   font-weight: 700;
@@ -550,6 +561,17 @@ button.sub-cell {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Компактный вклад в доход справа от имени: «+58$/т +0.05$/с»
+   (т — за тап, с — в секунду). flex-shrink: 0 — цифры не режутся. */
+.card-income {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .upgrade-desc {
@@ -590,20 +612,52 @@ button.sub-cell {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.card-progress {
+  max-width: 100%;
 }
 
 .upgrade-card.locked .progress-label {
   color: var(--danger);
 }
 
+/* Узкие экраны (≤360px): экономим каждый пиксель для имени —
+   иначе ellipsis съедает его почти целиком («М…» вместо «Мебель»). */
+@media (max-width: 360px) {
+  .upgrade-card {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .upgrade-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 21px;
+    border-radius: 9px;
+  }
+
+  .card-income {
+    font-size: 10px;
+  }
+
+  .upgrade-buy {
+    min-width: 76px;
+    padding: 8px;
+    font-size: 12.5px;
+  }
+}
+
 .upgrade-buy {
-  min-width: 108px;
-  padding: 10px 12px;
+  min-width: 86px;
+  max-width: 40vw;
+  padding: 9px 10px;
   border: none;
   border-radius: 10px;
   background: var(--accent);
   color: #062b14;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 800;
   cursor: pointer;
   text-align: center;

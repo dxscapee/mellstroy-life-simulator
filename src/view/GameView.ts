@@ -53,6 +53,21 @@ const PC_ANCHOR: SceneAnchor = { dx: -38, dy: 172, scale: 0.78 };
 const TECH_ANCHOR: SceneAnchor = { dx: 197, dy: 190, scale: 0.72 };
 
 /**
+ * ПОРТРЕТНАЯ КОМПОЗИЦИЯ (по референсу Lamar Idle Vlogger): вертикальная стопка —
+ * дом сверху, тачка под ним, персонаж крупный у левого края, рабочее место внизу
+ * по центру. Активируется при h > w (телефон вертикально); ландшафт — мокап выше.
+ * Смещения — от ЦЕНТРА КОМПОЗИЦИИ (cy из layout), масштабы крупнее: экран узкий,
+ * и объектам нужно остаться читаемыми.
+ */
+const PORTRAIT_HOUSE: SceneAnchor = { dx: 0, dy: -195, scale: 0.95 };
+const PORTRAIT_YARD: SceneAnchor = { dx: 0, dy: -165, scale: 0.72 };
+const PORTRAIT_CAR: SceneAnchor = { dx: 15, dy: -55, scale: 0.85 };
+const PORTRAIT_CHAR: SceneAnchor = { dx: -95, dy: 35, scale: 1.4 };
+const PORTRAIT_FURNITURE: SceneAnchor = { dx: -95, dy: 175, scale: 0.95 };
+const PORTRAIT_PC: SceneAnchor = { dx: 55, dy: 172, scale: 0.85 };
+const PORTRAIT_TECH: SceneAnchor = { dx: 150, dy: 178, scale: 0.8 };
+
+/**
  * Слой 1: игровая сцена Pixi. Знает только про рисование и ввод на холсте.
  * Игровую логику не трогает — наружу отдаёт колбэк onTap и методы-эффекты.
  *
@@ -380,6 +395,25 @@ export class GameView {
     const usable = Math.max(120, h - topFree - bottomFree);
     const cy = topFree + usable * 0.46;
 
+    // Выбор композиции: вертикальный экран — стопка по референсу Lamar,
+    // горизонтальный — мокап владельца. Смена ориентации на лету работает.
+    const portrait = h > w;
+    const A = portrait
+      ? {
+          house: PORTRAIT_HOUSE, yard: PORTRAIT_YARD, car: PORTRAIT_CAR,
+          char: PORTRAIT_CHAR, furniture: PORTRAIT_FURNITURE,
+          pc: PORTRAIT_PC, tech: PORTRAIT_TECH,
+        }
+      : {
+          house: HOUSE_ANCHOR, yard: YARD_ANCHOR, car: CAR_ANCHOR,
+          char: CHAR_ANCHOR, furniture: FURNITURE_ANCHOR,
+          pc: PC_ANCHOR, tech: TECH_ANCHOR,
+        };
+
+    // В портрете вертикальные зазоры сжимаются на низких экранах (позиция —
+    // можно, размеры — нельзя). На эталонном 375×667 коэффициент ровно 1.
+    const dyScale = portrait ? Math.min(1, usable / 380) : 1;
+
     const place = (item: Container | null, a: SceneAnchor): void => {
       if (!item) return;
       // Размер — КОНСТАНТА плейсхолдера: экран влияет только на положение.
@@ -392,16 +426,16 @@ export class GameView {
       // Дрейф: доля якоря от самого крайнего, в сторону своего смещения.
       const driftShare = Math.abs(a.dx) / SCENE_MAX_DX;
       item.x = cx + effDx + Math.sign(a.dx) * drift * driftShare;
-      item.y = cy + a.dy;
+      item.y = cy + a.dy * dyScale;
     };
 
-    place(this.house, HOUSE_ANCHOR);
-    place(this.yard, YARD_ANCHOR);
-    place(this.car, CAR_ANCHOR);
-    place(this.workplace.get('furniture') ?? null, FURNITURE_ANCHOR);
-    place(this.workplace.get('pc') ?? null, PC_ANCHOR);
-    place(this.workplace.get('tech') ?? null, TECH_ANCHOR);
-    place(this.character, CHAR_ANCHOR);
+    place(this.house, A.house);
+    place(this.yard, A.yard);
+    place(this.car, A.car);
+    place(this.workplace.get('furniture') ?? null, A.furniture);
+    place(this.workplace.get('pc') ?? null, A.pc);
+    place(this.workplace.get('tech') ?? null, A.tech);
+    place(this.character, A.char);
 
     // Растительность следует за домом (та же система координат, что у сцены),
     // масштаб 1 — экранные размеры прямоугольника-заглушки константны.
@@ -419,19 +453,36 @@ export class GameView {
     // Подписи стадий следуют за своими объектами; офсеты константные — размеры
     // (и подписей, и объектов) от экрана не зависят. Подписи дома/двора клампятся
     // ниже HUD (topFree): на низких окнах иначе они прячутся под чип эпохи.
+    // В ПОРТРЕТЕ стопка плотная — подписи ставим СБОКУ/ПОД объектом, иначе
+    // три подписи слипаются в одну кучу под HUD (проверено на 375×667).
     const labelTopLimit = topFree + 34;
-    this.stageLabels.get('house')?.position.set(
-      this.house?.x ?? cx, Math.max((this.house?.y ?? cy) - 98, labelTopLimit));
-    this.stageLabels.get('car')?.position.set(
-      this.car?.x ?? 0, (this.car?.y ?? 0) - 70);
-    this.stageLabels.get('bg')?.position.set(
-      this.yard?.x ?? cx, Math.max((this.yard?.y ?? cy) - 70, labelTopLimit));
-    this.stageLabels.get('furniture')?.position.set(
-      this.workplace.get('furniture')?.x ?? 0, (this.workplace.get('furniture')?.y ?? 0) - 70);
-    this.stageLabels.get('pc')?.position.set(
-      this.workplace.get('pc')?.x ?? 0, (this.workplace.get('pc')?.y ?? 0) - 68);
-    this.stageLabels.get('tech')?.position.set(
-      this.workplace.get('tech')?.x ?? 0, (this.workplace.get('tech')?.y ?? 0) - 70);
+    if (portrait) {
+      this.stageLabels.get('house')?.position.set(
+        this.house?.x ?? cx, Math.max((this.house?.y ?? cy) - 80, labelTopLimit));
+      this.stageLabels.get('bg')?.position.set(
+        (this.yard?.x ?? cx) + 125, (this.yard?.y ?? cy) + 10);
+      this.stageLabels.get('car')?.position.set(
+        (this.car?.x ?? 0) + 130, (this.car?.y ?? 0) + 4);
+      this.stageLabels.get('furniture')?.position.set(
+        (this.workplace.get('furniture')?.x ?? 0) - 30, (this.workplace.get('furniture')?.y ?? 0) + 58);
+      this.stageLabels.get('pc')?.position.set(
+        (this.workplace.get('pc')?.x ?? 0) + 45, (this.workplace.get('pc')?.y ?? 0) + 58);
+      this.stageLabels.get('tech')?.position.set(
+        (this.workplace.get('tech')?.x ?? 0) + 65, (this.workplace.get('tech')?.y ?? 0) - 62);
+    } else {
+      this.stageLabels.get('house')?.position.set(
+        this.house?.x ?? cx, Math.max((this.house?.y ?? cy) - 98, labelTopLimit));
+      this.stageLabels.get('car')?.position.set(
+        this.car?.x ?? 0, (this.car?.y ?? 0) - 70);
+      this.stageLabels.get('bg')?.position.set(
+        this.yard?.x ?? cx, Math.max((this.yard?.y ?? cy) - 70, labelTopLimit));
+      this.stageLabels.get('furniture')?.position.set(
+        this.workplace.get('furniture')?.x ?? 0, (this.workplace.get('furniture')?.y ?? 0) - 70);
+      this.stageLabels.get('pc')?.position.set(
+        this.workplace.get('pc')?.x ?? 0, (this.workplace.get('pc')?.y ?? 0) - 68);
+      this.stageLabels.get('tech')?.position.set(
+        this.workplace.get('tech')?.x ?? 0, (this.workplace.get('tech')?.y ?? 0) - 70);
+    }
   }
 
   /**

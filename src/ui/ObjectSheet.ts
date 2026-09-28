@@ -10,6 +10,8 @@ interface CardRefs {
   /** Прогресс-бар эволюции: заполнение + подпись «ур. 7/10 · Стадия». */
   barFillEl: HTMLElement;
   barLabelEl: HTMLElement;
+  /** Компактный вклад в доход справа от имени: «+58$/т +0.05$/с». */
+  incomeEl: HTMLElement;
   buyBtn: HTMLButtonElement;
   def: ObjectDef;
   /** Кэш последнего отображённого состояния — пишем в DOM только при изменении. */
@@ -137,9 +139,21 @@ export class ObjectSheet {
     const info = document.createElement('div');
     info.className = 'card-info';
 
+    // Верхняя строка: имя слева (схлопывается с многоточием) + вклад в доход
+    // справа в компактной форме («т» = за тап, «с» = в секунду) — строка
+    // гарантированно входит в карточку на любом экране.
+    const top = document.createElement('div');
+    top.className = 'card-top';
+
     const name = document.createElement('div');
     name.className = 'upgrade-name';
     name.textContent = def.name;
+
+    const income = document.createElement('span');
+    income.className = 'card-income';
+    income.title = 'т — за тап, с — в секунду';
+
+    top.append(name, income);
 
     const bar = document.createElement('div');
     bar.className = 'card-progress';
@@ -155,7 +169,7 @@ export class ObjectSheet {
     barLabel.className = 'progress-label';
 
     bar.append(barTrack, barLabel);
-    info.append(name, bar);
+    info.append(top, bar);
 
     // ---------- правая часть: кнопка покупки ----------
     const buyBtn = document.createElement('button');
@@ -168,7 +182,7 @@ export class ObjectSheet {
     root.append(icon, info, buyBtn);
 
     const card: CardRefs = {
-      root, barFillEl: barFill, barLabelEl: barLabel, buyBtn, def,
+      root, barFillEl: barFill, barLabelEl: barLabel, incomeEl: income, buyBtn, def,
       shownLevel: -1, shownAffordable: false, shownUnlocked: true,
       cachedCost: this.game.state.getUpgradeCost(def),
     };
@@ -266,24 +280,25 @@ export class ObjectSheet {
     // Формируем текст о вкладе в доходы
     const incomeInfo = this.getIncomeInfo(def);
 
-    // ---------- прогресс-бар ----------
+    // ---------- прогресс-бар (короткая подпись: уровень + стадия) ----------
+    card.incomeEl.textContent = unlocked ? incomeInfo : '';
+
     if (!unlocked && def.requires) {
       card.barFillEl.style.width = '0%';
       card.barLabelEl.textContent = `Нужен: ${getObject(def.requires).name}`;
     } else if (state.isMaxed(def)) {
       card.barFillEl.style.width = '100%';
-      card.barLabelEl.textContent = incomeInfo || 'MAX';
+      const stage = def.tierNames?.[Math.floor(level / gameConfig.tiers.levelsPerTier)];
+      card.barLabelEl.textContent = stage ? `ур. ${level} · ${stage}` : 'MAX';
     } else if (level > 0) {
       const perTier = gameConfig.tiers.levelsPerTier;
       const inTier = level % perTier;
       card.barFillEl.style.width = `${(inTier / perTier) * 100}%`;
       const stage = def.tierNames?.[Math.floor(level / perTier)];
-      card.barLabelEl.textContent = stage
-        ? `ур. ${level} · ${stage} · ${incomeInfo}`
-        : `ур. ${level} · ${incomeInfo}`;
+      card.barLabelEl.textContent = stage ? `ур. ${level} · ${stage}` : `ур. ${level}`;
     } else {
       card.barFillEl.style.width = '0%';
-      card.barLabelEl.textContent = incomeInfo || 'Не куплено';
+      card.barLabelEl.textContent = 'Не куплено';
     }
 
     // ---------- кнопка ----------
@@ -307,16 +322,16 @@ export class ObjectSheet {
 
     const parts: string[] = [];
 
-    // Вклад следующего уровня в активный доход
+    // Вклад следующего уровня в активный доход («т» = за тап).
     if (def.aWeight > 0) {
       const contribution = gameConfig.moneyPerTap.mul(def.aWeight * tierMult);
-      parts.push(`+${formatMoney(contribution)}/тап`);
+      parts.push(`+${formatMoney(contribution)}/т`);
     }
 
-    // Вклад следующего уровня в пассивный доход
+    // Вклад следующего уровня в пассивный доход («с» = в секунду).
     if (def.pWeight > 0) {
       const contribution = gameConfig.passiveBase.mul(def.pWeight * tierMult);
-      parts.push(`+${formatMoney(contribution)}/сек`);
+      parts.push(`+${formatMoney(contribution)}/с`);
     }
 
     return parts.length > 0 ? parts.join(' ') : '';
