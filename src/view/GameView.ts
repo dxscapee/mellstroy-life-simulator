@@ -18,21 +18,26 @@ interface FloatText {
 }
 
 /**
- * ЗАКОН РАСКЛАДКИ СЦЕНЫ v2 (чертёж владельца от 2026-09-29).
+ * ЗАКОН РАСКЛАДКИ СЦЕНЫ v2 (чертёж владельца 2026-09-29, уточнён 2026-09-30).
  *
  * Эталонная композиция — вертикальный экран SCENE_REF_W × SCENE_REF_H
  * (1120×1505), все координаты сняты с чертежа. Два ТИПА объектов:
  *
- * СТАТИЧЕСКИЕ (фон, двор, дом) — расставляются ОДИН РАЗ (фон — при init,
- * двор/дом — на текущий экран) и по X больше никогда не двигаются; по Y
- * только перепосадка центра композиции при ресайзе. Даже если объект
- * частично выходит за окно — он не сдвигается (требование владельца).
+ * СТАТИЧЕСКИЕ (фон, двор, дом) — X следует за ЦЕНТРОМ ЭКРАНА на КАЖДОМ
+ * ресайзе (фикс владельца 2026-09-30: раньше X фиксировался один раз при init,
+ * и при сужении окна дом/двор/фон «уезжали» вправо); Y — центр композиции
+ * между HUD и таб-баром. Размеры константны: непропорциональное окно срезает
+ * край объекта, но сам объект остаётся в центре.
  *
  * ДИНАМИЧЕСКИЕ (игрок, машина, рабочее место) — якорь от центра композиции;
  * на широких окнах отъезжают от центра (жёлтые стрелки чертежа): drift =
  * излишек ширины × DRIFT_GAIN, потолок DRIFT_MAX_TOTAL. На узких окнах
  * отъезд схлопывается (squeeze), центр композиции по Y садится в свободную
  * полосу между HUD и таб-баром (только позиция, размеры не трогаются).
+ *
+ * ГРУППА ИГРОКА (игрок + причёска/одежда/часы) НЕ анимируется (владелец
+ * 2026-09-30, временно): покачивание по Y и наклон сняты, остался только
+ * сквиш-отклик на тап. Разъезд по ширине окна — часть раскладки, не анимации.
  *
  * Все объекты — ПРЯМОУГОЛЬНИКИ-ЗАГЛУШКИ в цветах чертежа с номером и
  * размером в px (цель: владелец снимает размеры текстур). Текстуры и видео
@@ -54,13 +59,18 @@ const BOTTOM_FREE = 120; // таб-бар
 /** Доля свободной полосы, на которой стоит центр композиции. */
 const CY_FRAC = 0.46;
 
-/** Заглушка одного объекта: цвет/номер/размер — с чертежа. */
+/**
+ * Заглушка одного объекта: цвет/номер/размер — с чертежа.
+ * lift — подъём ПОДПИСИ (px) над верхом прямоугольника: у стопок конгруэнтных
+ * слоёв подписи ставятся колонкой, иначе сливаются в одну нечитаемую строку.
+ */
 interface RectSpec {
   w: number;
   h: number;
   color: number;
   num: string;
   label: string;
+  lift?: number;
 }
 
 /**
@@ -71,21 +81,31 @@ const YARD_SPEC: RectSpec = { w: 1080, h: 910, color: 0xff00aa, num: '6', label:
 const HOUSE_SPEC: RectSpec = { w: 740, h: 620, color: 0x00a844, num: '4', label: 'ДОМ' };
 const CAR_SPEC: RectSpec = { w: 290, h: 190, color: 0xe01010, num: '2', label: 'МАШИНА' };
 const CHAR_SPEC: RectSpec = { w: 330, h: 690, color: 0xe01010, num: '1', label: 'ИГРОК' };
-const FURNITURE_SPEC: RectSpec = { w: 350, h: 250, color: 0xe01010, num: '12', label: 'МЕБЕЛЬ' };
-const TECH_SPEC: RectSpec = { w: 350, h: 250, color: 0xe01010, num: '11', label: 'МИКРОФОН' };
-const PC_SPEC: RectSpec = { w: 350, h: 250, color: 0xe01010, num: '10', label: 'КОМП' };
+/**
+ * Рабочее место: ТРИ КОНГРУЭНТНЫХ слоя 350×300, стоящих в ОДНОЙ точке
+ * (владелец 2026-09-30: «все объекты в одном месте, просто наложены друг на
+ * друга»): мебель(12) — дальний, микрофон(11) — средний, комп(10) — ближний.
+ * lift разводит подписи колонкой над верхом: КОМП → МИКРОФОН → МЕБЕЛЬ.
+ */
+const FURNITURE_SPEC: RectSpec = { w: 350, h: 300, color: 0xe01010, num: '12', label: 'МЕБЕЛЬ', lift: 0 };
+const TECH_SPEC: RectSpec = { w: 350, h: 300, color: 0xe01010, num: '11', label: 'МИКРОФОН', lift: 27 };
+const PC_SPEC: RectSpec = { w: 350, h: 300, color: 0xe01010, num: '10', label: 'КОМП', lift: 54 };
 
 /**
  * Носимые на игроке: дети контейнера игрока, наследуют его позицию/масштаб.
- * Слои (глубина addChild-порядка): тело(1) → причёска(8)+одежда(9) → часы(7).
+ * Все слои КОНГРУЭНТНЫ игроку (330×690) — текстуры рисуются на одном холсте
+ * и совпадают с телом пиксель в пиксель (владелец 2026-09-30); часы приподняты
+ * на 20px относительно игрока. Слои (глубина addChild): тело(1) → причёска(8)
+ * + одежда(9) → часы(7). Подписи разведены колонкой (шаг 27px от верха тела):
+ * ПРИЧЁСКА → ОДЕЖДА → ЧАСЫ → ИГРОК.
  */
 const WORN_SPECS: Record<'hair' | 'clothes' | 'watch', RectSpec & { ox: number; oy: number }> = {
-  // Причёска — над головой (верх тела).
-  hair: { w: 200, h: 90, color: 0xe01010, num: '8', label: 'ПРИЧЁСКА', ox: -40, oy: -300 },
-  // Одежда — центр корпуса.
-  clothes: { w: 250, h: 300, color: 0xe01010, num: '9', label: 'ОДЕЖДА', ox: 0, oy: 10 },
-  // Часы — низ корпуса (запястье), поверх одежды.
-  watch: { w: 70, h: 70, color: 0xe01010, num: '7', label: 'ЧАСЫ', ox: 90, oy: 170 },
+  // Причёска — ровно на игроке (тот же холст 330×690).
+  hair: { w: 330, h: 690, color: 0xe01010, num: '8', label: 'ПРИЧЁСКА', ox: 0, oy: 0, lift: 81 },
+  // Одежда — ровно на игроке (тот же холст 330×690, один слой с причёской).
+  clothes: { w: 330, h: 690, color: 0xe01010, num: '9', label: 'ОДЕЖДА', ox: 0, oy: 0, lift: 54 },
+  // Часы — тот же холст 330×690, но на 20px ВЫШЕ игрока (подпись в колонке).
+  watch: { w: 330, h: 690, color: 0xe01010, num: '7', label: 'ЧАСЫ', ox: 0, oy: -20, lift: 7 },
 };
 
 /** Якорь динамического объекта: смещение от центра композиции. */
@@ -94,9 +114,13 @@ type DynAnchor = { dx: number; dy: number };
 // Снято с чертежа (эталон 1120×1505, центр композиции (560, ~707)):
 const CAR_ANCHOR: DynAnchor = { dx: 230, dy: 35 };
 const CHAR_ANCHOR: DynAnchor = { dx: -240, dy: 215 };
-const FURNITURE_ANCHOR: DynAnchor = { dx: 280, dy: 240 };
-const PC_ANCHOR: DynAnchor = { dx: 130, dy: 450 };
-const TECH_ANCHOR: DynAnchor = { dx: 150, dy: 330 };
+/**
+ * Рабочее место — ОДНА точка на все три конгруэнтных слоя (владелец
+ * 2026-09-30: «положение как у стола, но чуть-чуть правее»). Стол был
+ * (280, 240) → +30 вправо; центр по Y не сдвигаем — верх прямоугольника
+ * поднялся сам на 25px из-за роста высоты 250 → 300.
+ */
+const WORKPLACE_ANCHOR: DynAnchor = { dx: 310, dy: 240 };
 
 /** Общий dx рабочей группы: все три слоя отъезжают КАК ОДНО ЦЕЛОЕ. */
 const WORKPLACE_GROUP_DX = 200;
@@ -138,10 +162,8 @@ export class GameView {
   /** Метка фона (отдельный текст в stage — у WorldLayer нет своих детей). */
   private worldLabel: Text | null = null;
 
-  private charBaseY = 0;
-  /** Базовый масштаб персонажа (от него считаются squash-эффект и idle). */
+  /** Базовый масштаб персонажа — точка возврата сквиш-эффекта при тапе. */
   private charBaseScale = 1;
-  private time = 0;
 
   /** Пул текстов «+1$»: без аллокаций на каждый тап. */
   private floatPool: FloatText[] = [];
@@ -184,8 +206,7 @@ export class GameView {
       this.onCanvasTap(x, y);
     });
 
-    // Статические слои: единственная расстановка (инициализирующая).
-    this.placeStatic();
+    // Единый закон раскладки (статику центрирует, динамику сажает по якорям).
     this.layout();
 
     this.app.renderer.on('resize', () => this.layout());
@@ -230,13 +251,14 @@ export class GameView {
 
     // Метка: номер из чертежа + название + размер текстуры в px.
     // Центр-верх прямоугольника: метка видна, даже когда края объекта
-    // выходят за окно (по чертежу они и должны выходить).
+    // выходят за окно (по чертежу они и должны выходить). lift поднимает
+    // подпись в стопке конгруэнтных слоёв.
     const mark = new Text({
       text: `${spec.num} · ${spec.label} · ${spec.w}×${spec.h}`,
       style: this.markerStyle(),
     });
     mark.anchor.set(0.5, 1);
-    mark.position.set(0, Math.round(-spec.h / 2) - 6);
+    mark.position.set(0, Math.round(-spec.h / 2) - 6 - (spec.lift ?? 0));
     c.addChild(mark);
     this.markers.set(c, { mark, h: spec.h });
 
@@ -263,13 +285,21 @@ export class GameView {
     this.app.stage.addChild(this.car);
   }
 
-  /** Рабочее место: мебель(12) → микрофон(11) → комп(10), все динамические. */
+  /**
+   * Рабочее место: мебель(12) → микрофон(11) → комп(10), все динамические.
+   * Порядок addChild = ГЛУБИНА (мебель дальняя, комп ближний) — по чертежу
+   * владельца; геометрия у всех трёх одна (см. WORKPLACE_ANCHOR).
+   */
   private buildWorkplace(): void {
-    this.workplace.set('tech', this.buildRect(TECH_SPEC));
-    this.workplace.set('pc', this.buildRect(PC_SPEC));
-    this.workplace.set('furniture', this.buildRect(FURNITURE_SPEC));
+    const furniture = this.buildRect(FURNITURE_SPEC);
+    const tech = this.buildRect(TECH_SPEC);
+    const pc = this.buildRect(PC_SPEC);
 
-    for (const item of this.workplace.values()) {
+    this.workplace.set('furniture', furniture);
+    this.workplace.set('tech', tech);
+    this.workplace.set('pc', pc);
+
+    for (const item of [furniture, tech, pc]) {
       item.visible = false; // появляется после покупки
       this.app.stage.addChild(item);
     }
@@ -282,8 +312,9 @@ export class GameView {
   }
 
   /**
-   * Носимые — ДЕТИ персонажа: наследуют его позицию, масштаб и поворот,
-   * поэтому при idle-покачивании и squash-эффекте двигаются вместе с телом.
+   * Носимые — ДЕТИ персонажа: наследуют его позицию и масштаб, поэтому сквиш
+   * при тапе двигает их вместе с телом (idle-покачивание снято владельцем
+   * 2026-09-30 — позиция группы игрока заморожена).
    * Порядок addChild: причёска(8) и одежда(9) — один слой, часы(7) — поверх.
    */
   private buildWorn(): void {
@@ -314,28 +345,9 @@ export class GameView {
   // ------------------------------------------------------------- раскладка
 
   /**
-   * СТАТИЧЕСКИЕ СЛОИ: единственная расстановка (и перепосадка центра по Y
-   * при ресайзе — см. layout). X фиксируется намертво от центра экрана.
-   */
-  private placeStatic(): void {
-    const w = this.app.screen.width;
-    const h = this.app.screen.height;
-    const cy = this.compositionCenterY(h);
-
-    const cx = Math.round(w / 2);
-    if (this.yard) {
-      this.yard.position.set(cx, cy + YARD_DY);
-    }
-    if (this.house) {
-      this.house.position.set(cx, cy + HOUSE_DY);
-    }
-
-    this.placeWorldLabel();
-  }
-
-  /**
-   * ДИНАМИЧЕСКИЕ СЛОИ: якоря от центра композиции; на широких окнах — отъезд
-   * (жёлтые стрелки), на узких — схлопывание к центру. Размеры константы.
+   * ЕДИНЫЙ ЗАКОН РАСКЛАДКИ (init + каждый ресайз): статика центрируется по X
+   * экрана, динамика садится по якорям от центра композиции (дрейф на широких
+   * окнах, squeeze на узких). Размеры объектов константны — зума сцены нет.
    */
   private layout(): void {
     const w = this.app.screen.width;
@@ -346,10 +358,15 @@ export class GameView {
       this.bg.height = h;
     }
 
-    // Перепосадка центра по Y: статика едет только по вертикали (по X — нет).
+    // Фон: тот же центр + cover под ТЕКУЩИЙ экран (иначе при сужении окна
+    // он, как и статика, «уезжал» вправо — баг владельца 2026-09-30).
+    this.world.layout(w, h);
+
+    // Статика: X ВСЕГДА центр экрана; Y — центр композиции между HUD и таб-баром.
+    const cx = w * 0.5;
     const cy = this.compositionCenterY(h);
-    if (this.yard) this.yard.y = cy + YARD_DY;
-    if (this.house) this.house.y = cy + HOUSE_DY;
+    if (this.yard) this.yard.position.set(cx, cy + YARD_DY);
+    if (this.house) this.house.position.set(cx, cy + HOUSE_DY);
 
     // Метки статики не должны прятаться под HUD: если верх прямоугольника
     // ушёл за панель, метка садится на первую видимую строку.
@@ -361,11 +378,10 @@ export class GameView {
     const drift = Math.min(DRIFT_MAX_TOTAL, extra * DRIFT_GAIN);
     const squeeze = Math.min(1, w / SCENE_REF_W);
 
-    const cx = w * 0.5;
     const driftOffset = (shareDx: number): number =>
       Math.sign(shareDx || 1) * drift * driftShare(shareDx);
-    // Составной объект (рабочее место) отъезжает ЦЕЛИКОМ — иначе слои
-    // расползаются при ресайзе. Якоря задают только взаимные смещения.
+    // Рабочее место — ОДИН дрейф на все три слоя: группа отъезжает целиком
+    // и слои не расползаются при ресайзе (якорь у них теперь общий).
     const workplaceDrift = driftOffset(WORKPLACE_GROUP_DX);
     const place = (item: Container | null, a: DynAnchor, driftX = workplaceDrift): void => {
       if (!item) return;
@@ -374,14 +390,11 @@ export class GameView {
     };
 
     place(this.car, CAR_ANCHOR, driftOffset(CAR_ANCHOR.dx));
-    place(this.workplace.get('furniture') ?? null, FURNITURE_ANCHOR);
-    place(this.workplace.get('pc') ?? null, PC_ANCHOR);
-    place(this.workplace.get('tech') ?? null, TECH_ANCHOR);
+    // Рабочее место: три конгруэнтных слоя в ОДНОЙ точке, дрейф — общей группой.
+    place(this.workplace.get('furniture') ?? null, WORKPLACE_ANCHOR);
+    place(this.workplace.get('pc') ?? null, WORKPLACE_ANCHOR);
+    place(this.workplace.get('tech') ?? null, WORKPLACE_ANCHOR);
     place(this.character, CHAR_ANCHOR, driftOffset(CHAR_ANCHOR.dx));
-
-    if (this.character) {
-      this.charBaseY = this.character.y;
-    }
 
     this.placeWorldLabel();
   }
@@ -519,18 +532,13 @@ export class GameView {
   // ------------------------------------------------------------- кадр
 
   private update(dt: number): void {
-    this.time += dt;
-
     // Плавное возвращение масштаба после тапа (к базовому, а не к 1).
+    // Покачивание/idle ВРЕМЕННО снято (владелец 2026-09-30): позиция и наклон
+    // группы игрока заморожены — её двигает только раскладка по ширине окна.
     if (this.character) {
       const s = this.character.scale.x;
       const next = s + (this.charBaseScale - s) * Math.min(1, dt * 9);
       this.character.scale.set(next);
-
-      // Idle-анимация: лёгкое покачивание. Носимые — дети персонажа,
-      // наследуют y/rotation/scale автоматически (см. buildWorn).
-      this.character.y = this.charBaseY + Math.sin(this.time * 2.2) * 7;
-      this.character.rotation = Math.sin(this.time * 1.1) * 0.02;
     }
 
     // Обновление всплывающих текстов.
