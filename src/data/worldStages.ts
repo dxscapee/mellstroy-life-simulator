@@ -28,5 +28,7 @@ export const WORLD_ERA_NAMES: readonly string[] = [
   'Пустошь', 'Окраина', 'Предместье', 'Городок', 'Мегаполис', 'Мегаструктура',
 ];
 
-/** Файл заднего фона эпохи: WorldLayer сам решает, video это или картинка. */
-export const worldEraBackground = (era: number): string => `assets/world/bg_${era}`;
+// Путь ассета фона эпохи теперь не строка с расширением, а КЛЮЧ МАНИФЕСТА:
+// worldEraAssetKey(era) = `world/<эпоха>` (data/assets.ts). Что именно лежит под
+// ключом — картинка или видео — решает пайплайн по расширению мастера в art/world/
+// (см. ASSETS.md). Старая функция worldEraBackground удалена 2026-09-30.

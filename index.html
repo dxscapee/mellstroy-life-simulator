@@ -18,6 +18,16 @@
     <!-- Слой 2: UI-оверлей (z-index: 10), pointer-events: none, у интерактива — auto. -->
     <div id="ui-root"></div>
   </div>
+
+  <!-- Загрузочный экран: виден, пока грузится стартовый набор текстур.
+       Скрывается перед LoadingAPI.ready() (см. src/ui/BootScreen.ts). -->
+  <div id="boot-screen">
+    <div class="boot-inner">
+      <div class="boot-title">IDLE TYCOON</div>
+      <div class="boot-bar"><i id="boot-bar-fill"></i></div>
+      <div class="boot-status" id="boot-status">Загрузка…</div>
+    </div>
+  </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

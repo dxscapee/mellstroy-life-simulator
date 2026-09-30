@@ -48,14 +48,22 @@
 ## 3. Структура папок и назначение файлов
 
 ```
-index.html            — два хост-контейнера: #canvas-host (z-index 1), #ui-root (z-index 10).
+index.html            — два хост-контейнера: #canvas-host (z-index 1), #ui-root (z-index 10)
+                        + #boot-screen (загрузочный оверлей, скрывается перед LoadingAPI.ready()).
                         Тега SDK Яндекса НЕТ — скрипт грузится динамически из services/yandex.ts.
 CONTEXT.md            — правила работы AI с проектом (роль, запреты, проверки).
 ABOUT_PROJECT.md      — этот файл.
+ASSETS.md             — инструкция по текстурам сцены: art/ → npm run assets → public/assets + манифест.
+art/                  — МАСТЕРА текстур владельца (gitignored): art/<группа>/<стадия>.<ext>.
+public/assets/        — СОБРАННЫЕ ассеты (хеш-имена) + manifest.json; читает игра, уезжает в dist/.
+scripts/              — пайплайн ассетов (Node, вне src): build-assets.mjs (сборка/отчёт/бюджеты) и
+                        vite-plugin-assets.mjs (dev: слежение за art/ + перезагрузка; build: свежий dist).
 src/
-├── main.ts           — точка входа: собирает слои (Game → GameView → UIManager → yandexService → loop.start()).
-│                       Дебаг-панель подключается ТОЛЬКО здесь: if (import.meta.env.DEV) + динамический import().
-│                       window.game (консольный доступ) — тоже только в DEV.
+├── main.ts           — точка входа: Game → AssetRegistry + GameView (view.init и assets.init параллельно) →
+│                       preload стартового набора под загрузочным экраном → applySceneState/applyWorldStage →
+│                       UIManager → await SDK → gameplayStart (LoadingAPI.ready ПОСЛЕ ассетов) → loop.start →
+│                       boot.hide. Дебаг-панель подключается ТОЛЬКО здесь: if (import.meta.env.DEV) +
+│                       динамический import(). window.game/assets/scene (консольный доступ) — только в DEV.
 ├── data/             — ТОЛЬКО данные, ноль логики
 │   ├── gameConfig.ts     — все константы: startingMoney, базы потоков moneyPerTap (A) и passiveBase (P),
 │                            tiers (levelsPerTier=10, weightMultiplierPerTier=2, weightDecayPerTier=0.9 →
@@ -67,12 +75,19 @@ src/
 │                            + groupMeta/groupOrder (вкладки), objectById (Map), getObject(),
 │                            objectsByGroup(), tierOf(), buildSceneState() (визуал сцены для GameView).
 │                            НОВЫЙ ОБЪЕКТ = одна запись в objectDefs (+ строка в TIER_STAGES, если рисуется на сцене).
-│   └── worldStages.ts    — стадии МИРА: WORLD_EXP_STEP=2.5 (ширина периода по порядкам totalEarned),
+│   ├── worldStages.ts    — стадии МИРА: WORLD_EXP_STEP=2.5 (ширина периода по порядкам totalEarned),
 │                            WORLD_PERIODS=12; имена 12 фаз растительности (ЖИВУТ только в HUD/галерее —
 │                            слой растительности с карты сцены СНЯТ решением владельца 2026-09-29) +
-│                            6 эпох фона (WORLD_ERA_NAMES); worldEraBackground(era) — контракт пути
-│                            ассета фона (WorldLayer сам решает, video это или картинка).
+│                            6 эпох фона (WORLD_ERA_NAMES). Путь ассета фона — ключ манифеста
+│                            world/<эпоха> (data/assets.ts worldEraAssetKey): формат (картинка или
+│                            видео) определяет пайплайн по расширению файла-мастера (ASSETS.md).
 │                            Схема: фон меняется каждый ВТОРОЙ период (era = period/2).
+│   ├── sceneAssets.json  — ПАСПОРТ АССЕТОВ: группы (папка/размер/стадии/maxScale), качество WebP,
+│   │                        бюджеты. ЕДИНЫЙ источник размеров: читают и игра, и пайплайн (скрипт
+│   │                        парсит этот же JSON — размеры не дублируются в двух местах).
+│   └── assets.ts         — мост «объект ↔ папка»: AssetGroup (ключи JSON), SCENE_GROUPS,
+│                            OBJECT_ASSET_GROUP (ObjectId → папка), assetKey/worldEraAssetKey,
+│                            ASSET_MANIFEST_URL; комментарий-контракт по ключам/форматам/стадиям.
 ├── engine/           — чистая логика, НЕ знает про DOM/Pixi
 │   ├── types.ts          — контракты: ObjectGroup, ObjectId, ObjectDef, BuyMode ('one' — один
 │                            уровень за действие | 'tier' — до конца текущего грейда),
@@ -136,7 +151,7 @@ src/
 │                            (0x3f6f8f): перекраска по эпохе убрана — визуальную смену эпох даст
 │                            замена текстуры (worldEraBackground(era)); applyStage(era) — no-op,
 │                            контракт main → view сохранён.
-│   └── GameView.ts       — Application (resizeTo host, resolution ≤2, autoDensity); градиент через
+│   ├── GameView.ts       — Application (resizeTo host, resolution ≤2, autoDensity); градиент через
 │                            2D-canvas→Texture; сцена: ПРЯМОУГОЛЬНИКИ-ЗАГЛУШКИ (buildRect: fill+stroke
 │                            в цвете чертежа + метка «N · ИМЯ · W×H» для снятия размеров текстур;
 │                            все Graphics-фигуры, тинты и подписи стадий УДАЛЕНЫ); двор (yard) и
@@ -174,7 +189,20 @@ src/
 │                            (y = h − FLOOR_GAP − WORKPLACE_H/2, WORKPLACE_DX для X). РАЗМЕРЫ
 │                            объектов — константы (зум сцены отсутствует). НОВЫЙ СЦЕНОВЫЙ ОБЪЕКТ =
 │                            SPEC + build-метод + ветка applySceneState + якорь в layout.
-│                            ЗАМЕНА НА ТЕКСТУРЫ: внутри buildRect (и в WorldLayer), API не меняется.
+│                            ЗАМЕНА НА ТЕКСТУРЫ СДЕЛАНА: у каждого узла сцены спрайт + заглушка + метка
+│                            (Map visuals → RectVisual со стадией/appliedKey); applySceneState ставит
+│                            стадию по тиру (в т.ч. ветка house — раньше тир дома не переключался),
+│                            applyWorldStage тянет world/<эпоха> и освобождает прошлый фон; onLoaded →
+│                            refreshTextures (ленивая догрузка); метка и прямоугольник гаснут при
+│                            появлении текстуры. Размеры боксов — из sceneAssets.json (sceneBox),
+│                            сама раскладка не изменилась.
+│   └── assetRegistry.ts  — РАНТАЙМ-ЗАГРУЗЧИК ТЕКСТУР: init (fetch манифеста no-cache; нет/битый —
+│                            пусто, живём на заглушках), resolveKey (откат стадий вниз), texture
+│                            (кэш → Texture, иначе фоновая загрузка + null), preload (стартовый набор
+│                            с прогрессом и таймаутом, не реджектит), release, onLoaded. Картинки —
+│                            штатный Assets Pixi; видео — VideoSource со скрытым <video>
+│                            muted+playsinline+loop без контролов (Яндекс 1.6.2.5), ретрай автоплея по
+│                            первому жесту, release закрывает декодер. О раскладке не знает.
 ├── ui/               — HTML-оверлей (z-index 10)
 │   ├── styles.css        — #ui-root{pointer-events:none}, button/.js-interactive{auto};
 │                            .sheet-modes/.mode-btn — радио режима покупки (активный = --accent),
@@ -244,7 +272,11 @@ src/
 │                            к следующей + фаза растительности), будущие (порог 10^(2·STEP·era) в
 │                            formatMoney). Строки строятся один раз, обновление по дифу (lastCurrent/
 │                            lastPct); isOpenState() — UIManager refreshing только открытым.
-│   └── OfflineModal.ts   — универсальная модалка show(title, body, buttonText, onClose).
+│   ├── OfflineModal.ts   — универсальная модалка show(title, body, buttonText, onClose).
+│   └── BootScreen.ts     — загрузочный оверлей #boot-screen (разметка в index.html, стили в
+│                            styles.css): setStatus/setProgress/hide. Скрывается перед
+│                            LoadingAPI.ready() — платформа видит уже одетую игру; без элементов
+│                            в разметке методы тихо ничего не делают.
 ├── services/
 │   └── yandex.ts         — синглтон yandexService. init(): НЕ в iframe → mock БЕЗ загрузки скрипта
 │                            (см. Решения #1); в iframe → динамическая загрузка sdk/v2 → YaGames.init().
@@ -292,6 +324,10 @@ src/
    UIManager: HUD + sheet.refresh().
 4. Офлайн: конструктор Game → SaveManager.load → loadFromSnapshot → OfflineProgress → pendingOfflineModal → main показывает модалку.
 5. Дебаг: debugPanel → публичное API Game + yandexService. В проде цепочки не существует.
+6. Ассеты: npm run assets / Vite-плагин (art/ → public/assets + manifest.json) → AssetRegistry.init
+   (манифест) → main.preload стартового набора (загрузочный экран) → GameView подменяет заглушки
+   спрайтами; догрузки ленивые (onLoaded → refreshTextures), смена эпохи освобождает прошлый фон
+   (release). LoadingAPI.ready() — только после прелоада (см. ASSETS.md).
 
 ---
 
@@ -306,6 +342,11 @@ src/
 - **Облачный сейв:** `yandexService.saveCloudData(state.toSnapshot())` — формат уже сериализуемый.
 - **Новая мета-шкала (по образцу подписчиков):** константы в gameConfig.subscribers (или своя секция),
   состояние + кэши цели/награды в GameState, таймер в Game.tick, чип в UIManager + CSS.
+- **Новая текстура (картинка или видео):** только файл — `art/<группа>/<стадия>.<ext>`; кода не
+  касаемся, пайплайн и манифест всё сделают (ASSETS.md). Новая ГРУППА = запись в sceneAssets.json +
+  строка в OBJECT_ASSET_GROUP (data/assets.ts) + спека/build-метод/ветка applySceneState (GameView).
+- **Смена размера или числа стадий:** правится только `src/data/sceneAssets.json` (игра берёт боксы
+  оттуда же, где пайплайн валидирует мастера) + перерисовать мастера.
 
 ---
 
@@ -321,6 +362,12 @@ src/
 7b. Инвалидация кэшей потоков (cachedMoneyPerTap + passive) — ПОСЛЕ любого изменения уровней (GameState.invalidateCaches).
 8. Hot path без аллокаций: пулы для «+1$», никаких new в тике/кадре.
 9. Любая ошибка слушателя шины не должна ронять цикл (EventBus try/catch).
+10. Ассеты: размеры/стадии — ТОЛЬКО из src/data/sceneAssets.json (единый источник для игры и
+    пайплайна); текстуры попадают в сцену ТОЛЬКО через AssetRegistry по манифесту (никаких
+    Texture.from(url) в GameView); папка public/assets/ генерируемая (руками не править), мастера —
+    только в art/ (gitignored); нет ассета — остаётся заглушка (игра не падает и не гадает); видео —
+    muted/playsinline/loop без контролов, 1–2 живых декодера максимум, освобождение через release();
+    раскладка о текстурах не знает (подмена внутри buildRect/WorldLayer, API сцены не меняется).
 
 ---
 
@@ -392,6 +439,45 @@ src/
    «статической как дом» — уточнено владельцем). Слой растительности СНЯТ с карты сцены (фазы
    остались в HUD/галерее — метрика totalEarned не тронута). Машина частично ПЕРЕД домом, двор
    за домом, фон дальний — перекрытия задуманы (текстуры с прозрачностью сделают стыки).
+17. **Система текстур: папки-мастера → пайплайн → манифест → AssetRegistry (2026-09-30, ASSETS.md).**
+   Задача владельца: он рисует текстуры — они сами встают в сцену, без правок кода и раскладки;
+   картинки и видео работают одинаково. Решения:
+   (1) КОНТРАКТ ИМЁН: `art/<группа>/<стадия>.<ext>` — папка = объект, имя = номер стадии,
+   расширение = формат (png/webp/jpg/avif/gif → картинка, mp4/webm/mov/m4v → видео). Стадия без
+   файла берёт ближайшую МЛАДШУЮ: один `0` закрывает все тиры/эпохи (иначе первые текстуры
+   выглядели бы «дырами» на старших стадиях). Один файл на стадию: два формата сразу — ошибка сборки.
+   (2) ЕДИНЫЙ ИСТОЧНИК РАЗМЕРОВ: src/data/sceneAssets.json — читают и игра (боксы заглушек/спрайтов),
+   и пайплайн (валидация аспекта, кап вывода, стадии, бюджеты). В GameView размеры больше не
+   дублируются (sceneBox берёт из JSON).
+   (3) ПАЙПЛАЙН scripts/build-assets.mjs (sharp в devDependencies, в бандл игры не входит): WebP
+   q82/alpha100, кап w×h×maxScale без увеличения, видео — копия как есть (sharp не умеет видео; перекодирование —
+   зона владельца; проверяются faststart и расширение), хеш-имена от содержимого И настроек,
+   manifest.json пишется только при изменениях (нет git-шума), чистка устаревшего, весовой отчёт и
+   ХАРД-бюджеты (90 МБ папка, 15 МБ стартовый набор; превышение = exit 1). Вес считается по диску,
+   а не только по манифесту.
+   (4) АВТОМАТИКА: scripts/vite-plugin-assets.mjs — в dev следит за art/ (chokidar Vite),
+   пересобирает и делает full-reload; в build прогоняет сборку до копирования public/ в dist.
+   Плагин никогда не валит dev/build: проблемы — только в консоль.
+   (5) РАНТАЙМ view/assetRegistry.ts: манифест (fetch no-cache; нет/битый → пусто), resolveKey с
+   откатом вниз, texture() НЕ ждёт (кэш → Texture, иначе запуск загрузки + null; onLoaded →
+   GameView.refreshTextures), release для памяти. Картинки — штатный Assets Pixi, видео —
+   VideoSource со скрытым <video> (muted+playsinline+loop, без контролов — требование 1.6.2.5),
+   ретрай автоплея по первому жесту, release закрывает декодер.
+   (6) ЗАГРУЗОЧНЫЙ ЭКРАН (ui/BootScreen.ts + #boot-screen + стили): main грузит стартовый набор
+   (фон текущей эпохи + тело игрока + все купленные объекты их стадий) ДО LoadingAPI.ready() —
+   платформа видит уже одетую игру.
+   (7) СЦЕНА: Map visuals → RectVisual (спрайт + заглушка + метка + запрошенная стадия + appliedKey);
+   при появлении текстуры прямоугольник и подпись гаснут; стадия ставится по тиру (у дома ПОЯВИЛАСЬ
+   ветка в applySceneState — раньше видимость дома не трогалась и тир не переключался), фон — по
+   эпохе (WorldLayer.setTexture; cover теперь считается по РАЗМЕРУ ТЕКСТУРЫ, а не по эталону: фон
+   любого аспекта закрывает экран без растяжения; applyStage удалён). Build.assetsDir вынесен в
+   'bundle/', чтобы dist/assets/ был ТОЛЬКО текстурами.
+   Проверено вживую (dev 5051): картинки (house/0, world/0, character/0) встают на сцену, подписи
+   гаснут; дом 0→10 уровней меняет текстуру на house/1; world/0.mp4 играется (VideoSource, muted,
+   loop, currentTime идёт), смена эпохи (totalEarned 1e6) подменяет фон на world/1.png и УДАЛЯЕТ
+   видео-элемент из DOM (release); без манифеста — чистые заглушки и чистая консоль; пайплайн
+   ловит конфликт форматов и занятый файл (EBUSY), печатает отчёт и бюджеты; tsc + vite build зелёные,
+   dist без debug-утечек.
 
 ---
 
@@ -411,15 +497,26 @@ src/
 4. **break_infinity.js — default export:** `import Decimal from 'break_infinity.js'`, НЕ `{ Decimal }`.
 5. **Пишущие инструменты могут вставлять мусор в файлы** — после записи читать файл и проверять целостность.
 6. **Автосейв каждые 10с** — правки state «протухают», если игра продолжает тикать в фоне теста.
+7. **Windows держит сгенерированный ассет, пока его отдаёт dev-сервер** — `npm run assets` не может
+   удалить устаревший файл (EBUSY: resource busy or locked). Это не ошибка: скрипт оставит файл,
+   напишет note и удалит его следующим прогоном (после перезапуска dev-сервера); манифест на такой
+   файл не ссылается.
+8. **Shebang (`#!`) в скриптах, которые импортирует vite.config, ломает esbuild** — `#!` внутри
+   бандла конфига = `Syntax error "!"`; поэтому scripts/build-assets.mjs без шебанга (запуск всегда
+   через `node scripts/...`).
+9. **Vite dev отдаёт index.html на несуществующий путь (SPA-fallback)** — «есть ли манифест» нельзя
+   проверять по HTTP-статусу: годен только успешный JSON-парсинг (иначе 200 + HTML).
 
 ---
 
 ## 8. Проверки и команды
 
 ```bash
-npm run dev         # http://localhost:5173 (дебаг-панель: ~ или точка в углу)
-npm run build       # tsc --noEmit && vite build
+npm run dev         # http://localhost:5050 (дебаг-панель: ~ или точка в углу); сам следит за art/
+npm run build       # tsc --noEmit && vite build (ассеты обновляются до копирования public/)
 npm run typecheck   # только типы
+npm run assets      # собрать текстуры из art/ + отчёт + проверка бюджетов (exit 1 при ошибке)
+npm run assets:watch# то же в режиме слежения за art/ (F5 руками)
 # zero-leakage дебага:
 grep -rl "debug-panel\|setupDebugPanel\|window.game" dist/   # должно быть пусто
 ```
@@ -434,11 +531,12 @@ grep -rl "debug-panel\|setupDebugPanel\|window.game" dist/   # должно бы
 
 - [ ] Престиж (сброс за постоянный множитель; точка расширения: recalculatePassiveIncome/getMoneyPerTap)
 - [ ] Rewarded-бустер x2 на N минут (yandexService.showRewardedVideo уже готов)
-- [ ] Текстуры/видео сцены: владелец готовит ассеты по меткам заглушек «N · ИМЯ · W×H» (таблица
-  размеров — в Журнале 2026-09-30: носимые и рабочее место рисуются на ОДНОМ холсте со слоем);
-  замена ВНУТРИ buildRect/WorldLayer, API не менять. Двор и
-  рабочее место — МНОГОСЛОЙНЫЕ фоны (задумка владельца); смену эпох вернуть через текстуры
-  worldEraBackground(era) в WorldLayer.applyStage. Тиры объектов = разные текстуры стадий.
+- [x] ~~Текстуры/видео сцены~~ — сделано 2026-09-30 (Журнал #17, инструкция ASSETS.md):
+  art/ → npm run assets → public/assets + manifest.json → AssetRegistry; картинки и видео на равных,
+  стадии по тирам, эпохи фона, загрузочный экран до LoadingAPI.ready(). Владельцу осталось нарисовать
+  и залить сами файлы (размеры и папки — ASSETS.md §2).
+- [ ] Многослойные фоны двора/рабочего места (задумка владельца): сейчас у группы один слой —
+  расширять новыми группами в sceneAssets.json (без правки пайплайна).
 - [x] ~~Ветвь «Рабочее место» на сцене~~ — сделано (плейсхолдеры tech/pc/furniture)
 - [ ] Облачные сейвы Яндекса (заготовки saveCloudData/loadCloudData уже есть)
 - [ ] Unit-тесты экономики (vitest): цены, гейты, тиры, офлайн, снапшоты v2
@@ -667,13 +765,18 @@ grep -rl "debug-panel\|setupDebugPanel\|window.game" dist/   # должно бы
   композиции: она СТОИТ НА ПОЛУ — низ FLOOR_GAP = 8px над нижним краем окна (владелец:
   «начинаться от пола… около 5–10 пикселей от нижней границы»). X не менялся (WORKPLACE_DX 310 +
   дрейф группой). На эталоне 1120×1300 это бокс x 695…1045, y 832…1292.
+  (7) РАЗМЕРЫ ДОМА И МАШИНЫ (владелец 2026-09-30): дом 740×620 → 370×620 — «слишком широкий,
+  должен целиком помещаться при окне телефонного размера» (высота не менялась, только уже);
+  машина 290×190 → 340×240 (+50px к ширине и высоте) + якорь CAR_ANCHOR.dx 230 → 150 —
+  «на ПК очень далеко от центра» (побочно упала доля дрейфа |dx|/400 — на широких окнах
+  машина отъезжает меньше). Оба числа живут в sceneAssets.json и пайплайном же валидируются.
   Проверено вживую (dev 5051): 1400×700 → 620×1000 → 390×780 — метка дома/двора стоит по центру
   каждого окна (700/310/195), фон закрывает экран и тоже центрирован, динамика дрейфует на широком и
   сжимается на узком; два кадра подряд — позиции меток группы игрока совпадают (idle нет); тап даёт
   «+N$» (и клейм-бар подписчиков); консоль чистая; tsc + vite build зелёные; dist без debug-утечек.
-  ТАБЛИЦА РАЗМЕРОВ ТЕКСТУР (актуальная на 2026-09-30): фон 1120×1505, двор 1080×910, дом 740×620,
+  ТАБЛИЦА РАЗМЕРОВ ТЕКСТУР (актуальная на 2026-09-30): фон 1120×1505, двор 1080×910, дом 370×620,
   игрок 330×690, причёска 330×240 (верхняя полоса игрока), одежда 330×450 (нижняя полоса),
-  часы 150×215 (слева вплотную), машина 290×190, мебель/микрофон/комп — один холст 350×460
+  часы 150×215 (слева вплотную), машина 340×240, мебель/микрофон/комп — один холст 350×460
   (стоят на полу). Причёска и одежда вместе ровно закрывают игрока — холсты совпадают с его
   полосами, борта стыкуются без зазоров и нахлёстов.
 - 2026-09-29 — СЦЕНА НА ПРЯМОУГОЛЬНИКАХ (переборка визуала по чертежу владельца, этап 1–2
@@ -710,3 +813,18 @@ grep -rl "debug-panel\|setupDebugPanel\|window.game" dist/   # должно бы
   dyScale = min(1, usable/380) — ТОЛЬКО позиции, размеры константны; на 375×667
   коэффициент ровно 1. Проверено вживую: 375×667 (стопка как в референсе),
   320×568 (всё влезло), 1120×800 (ландшафт не задет). tsc+build зелёные.
+- 2026-09-30 — СИСТЕМА ТЕКСТУР (ASSETS.md): папки-мастера art/<группа>/<стадия>.<ext> (картинка или
+  видео по расширению) → пайплайн npm run assets (sharp: WebP + кап размера без увеличения, видео
+  копией, хеш-имена от содержимого и настроек, manifest.json, чистка устаревшего, весовой отчёт,
+  бюджеты 90/15 МБ) → рантайм view/assetRegistry.ts (ленивая загрузка, откат стадий вниз, release,
+  видео через VideoSource) → сцена подменяет заглушки спрайтами (Map visuals, стадии по тирам,
+  фон по эпохам, метки гаснут) → загрузочный экран #boot-screen до LoadingAPI.ready(). Единый
+  источник размеров — src/data/sceneAssets.json (игра + пайплайн). Новые файлы: ASSETS.md,
+  scripts/build-assets.mjs, scripts/vite-plugin-assets.mjs, src/data/sceneAssets.json,
+  src/data/assets.ts, src/view/assetRegistry.ts, src/ui/BootScreen.ts. Правки: GameView (visuals,
+  стадии, фон, sceneBox), WorldLayer (setTexture + cover по текстуре; applyStage удалён), main
+  (прелоад до ready + dev-ручки window.assets/scene), index.html/styles.css (boot-screen),
+  vite.config (assetsDir 'bundle' + плагин), package.json (sharp + assets/assets:watch),
+  worldStages.ts (worldEraBackground → ключ мира в data/assets). Проверено: tsc/build зелёные,
+  живой прогон картинок, видео, смены тира и эпохи (release декодера), отсутствия манифеста,
+  конфликта форматов, занятого файла, бюджетов; dist без debug-утечек.
