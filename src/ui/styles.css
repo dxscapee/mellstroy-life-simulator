@@ -10,6 +10,7 @@
   --text-dim: #9aa5b1;
   --radius: 14px;
   --tabbar-h: 60px; /* высота нижней панели вкладок */
+  --menu-w: min(100%, 420px); /* ЕДИНАЯ ширина плашек меню: верхний HUD = нижняя панель = выноски */
 }
 
 * {
@@ -59,28 +60,194 @@ html, body, #app {
   pointer-events: auto; /* интерактив перехватывает клики */
 }
 
+/* ================= Кольцо прогресса мира (слева сверху) ================= */
+
+/*
+ * Круглая кнопка-шкала: тёмная «таблетка» в стиле плашек HUD, дорожка на весь
+ * круг и градиентная дуга прогресса поверх неё; процент — по центру.
+ * ПРИКРЕПЛЕНА К ЛЕВОМУ КРАЮ БЛОКА ПЛАШЕК (right: 100% + 10px) — при ресайзе
+ * окна она едет вместе с меню и не расходится с ним к краю экрана.
+ * Клик — галерея эпох (та же функция, что раньше была у чипа эпохи в HUD).
+ */
+.world-ring {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(100% + 10px);
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 34%, rgba(46, 204, 113, 0.18), rgba(16, 20, 24, 0.86) 70%);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+  z-index: 12;
+  transition: transform 0.14s ease, box-shadow 0.2s ease;
+}
+
+.world-ring:active {
+  transform: scale(0.94);
+}
+
+.world-ring-svg {
+  position: absolute;
+  inset: 6px;
+  width: auto;
+  height: auto;
+  /* Старт дуги сверху, как в мокапе владельца. */
+  transform: rotate(-90deg);
+}
+
+/* Дорожка на весь круг: видно, сколько пути ещё осталось. */
+.world-ring-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 6.5;
+}
+
+.world-ring-fg {
+  fill: none;
+  /* Градиент задаётся в SVG (UIManager) один раз. */
+  stroke: url(#world-ring-gradient);
+  stroke-width: 6.5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(163, 228, 53, 0.5));
+  /* Обводка рисуется по длине окружности; offset = остаток.
+     Точная длина (dasharray/dashoffset) подставляется из TS inline-стилем. */
+  transition: stroke-dashoffset 0.35s cubic-bezier(0.25, 0.8, 0.35, 1);
+}
+
+.world-ring-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15.5px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: #eaf7ef;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.75);
+  pointer-events: none;
+}
+
+/* Смена периода мира — кольцо вспыхивает (аналог прежней вспышки чипа). */
+.world-ring.evolved {
+  animation: ring-glow 1.2s ease-out 3;
+}
+
+@keyframes ring-glow {
+  0%, 100% {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+  40% {
+    box-shadow: 0 0 22px 4px rgba(46, 204, 113, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+}
+
+/* ================= Кнопка настроек (справа сверху) ================= */
+
+/* Статичная кнопка-плашка (после дизайна интерфейса сюда лягут графика/звук).
+   ПРИКРЕПЛЕНА К ПРАВОМУ КРАЮ БЛОКА ПЛАШЕК (left: 100% + 10px) — при ресайзе
+   окна едет вместе с меню; размер фиксирован, на узком портрете чуть свисает
+   за край экрана (см. медиа-блок ниже). */
+.settings-btn {
+  position: absolute;
+  top: calc(8px + env(safe-area-inset-top));
+  left: calc(100% + 10px);
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  z-index: 12;
+}
+
+.settings-btn:active {
+  transform: translateY(1px);
+}
+
 /* ================= HUD ================= */
 
 /*
- * Единый центральный блок 2×2 (компоновка как у нижнего меню: сжат к центру,
- * не растягивается). Ячейки:
- *   [пассив /сек] [$ всего]  — верхний ряд
- *   [за клик    ] [подписчики + бар] — нижний ряд
+ * ВЕРХНЯЯ ПАНЕЛЬ как ОДНО ЦЕЛОЕ: блок плашек по центру (+ кольцо и настройки,
+ * прикреплённые к его краям). Ширина и центрирование — те же, что у нижнего
+ * меню (--menu-w, left:50% + translateX(-50%)), поэтому верхние и нижние
+ * плашки совпадают по краям и никуда не уезжают при изменении ширины окна.
+ * Боковых отступов у сетки нет: крайние плашки вровень с нижней панелью.
  */
-.hud-top {
+.hud-bar {
   position: absolute;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: min(100%, 420px);
+  width: var(--menu-w);
+  pointer-events: none; /* плашки — не должны есть тапы по холсту */
+}
+
+/*
+ * Сетка плашек БЕЗ ПОДПИСЕЙ (ТЗ владельца 2026-09-30) — компактные ячейки:
+ *   [баланс] [пассив] / [новая валюта «soon»] [актив] / [подписчики + бар]
+ * Роль подписи: цвет значения (stat-<kind>) и title ячейки.
+ */
+.hud-top {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
+  padding: calc(8px + env(safe-area-inset-top)) 0 0;
   pointer-events: none; /* ячейки денег не должны есть тапы по холсту */
 }
 
-/* Ячейка-статистика: подпись сверху, значение снизу. */
+/* Узкие экраны (портрет): HUD сжимается между кольцом (слева) и настройками
+   (справа). Виджеты тоже мельчают. Порог 584px = начало наезда HUD 420px
+   на кольцо 72px при чистом центрировании. */
+@media (max-width: 583px) {
+  /* Блок сужается между виджетами — кольцо и настройки висят по его краям,
+     значит автоматически оказываются у краёв экрана (перекрытий нет). */
+  .hud-bar {
+    /* Центр доступной полосы [68 .. w-56]: сдвиг +6px, ширина 100%-124px. */
+    left: calc(50% + 6px);
+    width: min(calc(100% - 124px), 420px);
+  }
+
+  .world-ring {
+    width: 52px;
+    height: 52px;
+  }
+
+  .world-ring-svg {
+    inset: 4px;
+  }
+
+  .world-ring-pct {
+    font-size: 11.5px;
+  }
+
+  .cell-value {
+    font-size: 15.5px;
+  }
+}
+
+/* Мобильное (портретное) соотношение сторон на узком экране: кнопка настроек
+   СТАТИЧНА и остаётся полноразмерной — она отодвигается на 6px дальше от края
+   блока, поэтому совсем немного выходит за край экрана (владелец: «реально
+   чуть-чуть»). На широких экранах места хватает, кнопка целиком внутри. */
+@media (max-aspect-ratio: 1/1) and (max-width: 583px) {
+  .settings-btn {
+    left: calc(100% + 16px);
+  }
+}
+
+/* Ячейка-показатель: только значение (подписей у верхних плашек нет),
+   поэтому плашки компактные — смысл даёт цвет значения. */
 .hud-cell {
   background: var(--bg-panel);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -94,15 +261,6 @@ html, body, #app {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
-.cell-caption {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
 .cell-value {
   font-size: 17px;
   font-weight: 800;
@@ -111,15 +269,27 @@ html, body, #app {
   text-overflow: ellipsis;
 }
 
-/* Цветовая маркировка потоков: пассив — зелёный, тап — жёлтый. */
-.hud-cell:nth-child(1) .cell-value { color: var(--accent); }
-.hud-cell:nth-child(3) .cell-value { color: #f4b942; }
+/* Цветовая маркировка показателей: пассив — зелёный, тап и новая валюта — золотые. */
+.stat-balance .cell-value { color: var(--text); }
+.stat-passive .cell-value { color: var(--accent); }
+.stat-active .cell-value { color: #f4b942; }
 
-/* Ячейка подписчиков — кнопка (клик = забрать награду). */
+/* Плашка новой валюты (ещё не введена в игру): приглушённая заглушка «soon». */
+.stat-gold .cell-value {
+  color: rgba(244, 185, 66, 0.55);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+
+/* Ячейка подписчиков — кнопка (клик = забрать награду), на всю ширину блока. */
 button.sub-cell {
+  grid-column: 1 / -1;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text);
   font-family: inherit;
+  text-align: left;
   cursor: default;
   transition: box-shadow 0.2s;
 }
@@ -192,6 +362,141 @@ button.sub-cell {
   background: linear-gradient(90deg, #f4b942, #fff3c4);
 }
 
+/* ================= ПОПАП-ГАЛЕРЕЯ ЭПОХ ================= */
+
+/* Открывается кликом по кольцу прогресса (чипа эпохи в HUD больше нет). */
+
+/* Тот же паттерн «скрыта = не ловит тапы», что у модалки офлайна. */
+.era-pop {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px);
+  transform: translateX(-50%) scale(0.96);
+  transform-origin: bottom center;
+  width: var(--menu-w);
+  max-height: min(58vh, calc(100vh - var(--tabbar-h) - 150px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out, visibility 0.18s;
+  z-index: 15;
+}
+
+.era-pop.open {
+  transform: translateX(-50%) scale(1);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.era-pop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px 9px;
+}
+
+.era-pop-title {
+  font-size: 16.5px;
+  font-weight: 700;
+}
+
+.era-pop-list {
+  overflow-y: auto;
+  padding: 2px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Строка эпохи в галерее: иконка / имя + фазы / прогресс или порог. */
+.era-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.era-row.current {
+  border-color: rgba(46, 204, 113, 0.55);
+}
+
+.era-row.future {
+  opacity: 0.5;
+}
+
+.era-row-icon {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 19px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+}
+
+.era-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.era-row-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.era-row-veg {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.era-row-side {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.era-row.current .era-row-side {
+  color: var(--accent);
+}
+
+.era-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.era-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #2ecc71, #a3e435);
+}
+
 /* ================= ВКЛАДКИ ================= */
 
 /* Нижняя панель всегда сжата к центру: на широких экранах не растягивается. */
@@ -200,7 +505,7 @@ button.sub-cell {
   left: 50%;
   bottom: 0;
   transform: translateX(-50%);
-  width: min(100%, 420px);
+  width: var(--menu-w);
   display: flex;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-bottom: none;
@@ -254,7 +559,7 @@ button.sub-cell {
   bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px); /* зазор над меню (с учётом safe-area реальной высоты панели) */
   transform: translateX(-50%) scale(0.96);
   transform-origin: bottom center;
-  width: min(100%, 420px);
+  width: var(--menu-w);
   max-height: min(62vh, calc(100vh - var(--tabbar-h) - 140px));
   display: flex;
   flex-direction: column;
@@ -307,6 +612,38 @@ button.sub-cell {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ================= РЕЖИМ ПОКУПКИ (радио над карточками) ================= */
+
+.sheet-modes {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 10px;
+}
+
+.mode-btn {
+  flex: 1 1 0;
+  padding: 8px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+/* Выбранный режим (аналог установленного RadioButton в Qt). */
+.mode-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #062b14;
+}
+
 /* ================= КАРТОЧКА АПГРЕЙДА ================= */
 
 .upgrade-card {
@@ -331,14 +668,14 @@ button.sub-cell {
 }
 
 .upgrade-icon {
-  width: 50px;
-  height: 50px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
+  font-size: 23px;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
+  border-radius: 10px;
   flex-shrink: 0;
 }
 
@@ -350,6 +687,17 @@ button.sub-cell {
   min-width: 0;
 }
 
+/* Нижняя строка карточки (под баром): уровень + общий вклад в доход.
+   flex с min-width:0 гарантирует: что-то всегда схлопнется с многоточием,
+   но НИКОГДА не вылезет за карточку (главное требование «входит всегда»). */
+.card-bottom {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
 .upgrade-name {
   font-size: 15px;
   font-weight: 700;
@@ -357,6 +705,17 @@ button.sub-cell {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Общий вклад в доход справа от уровня: «+58$/т +0.05$/с»
+   (т — за тап, с — в секунду). flex-shrink: 0 — цифры не режутся. */
+.card-income {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .upgrade-desc {
@@ -397,24 +756,61 @@ button.sub-cell {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.card-progress {
+  max-width: 100%;
 }
 
 .upgrade-card.locked .progress-label {
   color: var(--danger);
 }
 
+/* Узкие экраны (≤360px): экономим каждый пиксель для имени —
+   иначе ellipsis съедает его почти целиком («М…» вместо «Мебель»). */
+@media (max-width: 360px) {
+  .upgrade-card {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .upgrade-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 21px;
+    border-radius: 9px;
+  }
+
+  .card-income {
+    font-size: 10px;
+  }
+
+  .upgrade-buy {
+    min-width: 76px;
+    padding: 8px;
+    font-size: 12.5px;
+  }
+}
+
 .upgrade-buy {
-  min-width: 108px;
-  padding: 10px 12px;
+  min-width: 86px;
+  max-width: 40vw;
+  padding: 9px 10px;
   border: none;
   border-radius: 10px;
   background: var(--accent);
   color: #062b14;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 800;
   cursor: pointer;
   text-align: center;
   transition: background 0.12s, transform 0.12s;
+  /* Зажатие кнопки покупки: жест не уезжает в скролл списка и не выделяет текст. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .upgrade-buy:disabled {
@@ -488,4 +884,59 @@ button.sub-cell {
   font-size: 15px;
   font-weight: 800;
   cursor: pointer;
+}
+
+/* ================= ЗАГРУЗОЧНЫЙ ЭКРАН ================= */
+
+/* Оверлей поверх всех слоёв: виден, пока грузится стартовый набор текстур.
+   Скрывается классом .boot-screen--hidden перед LoadingAPI.ready(). */
+#boot-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 32%, #232f3e 0%, #101418 72%);
+  transition: opacity 0.3s ease;
+}
+
+#boot-screen.boot-screen--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-inner {
+  width: min(78vw, 360px);
+  text-align: center;
+}
+
+.boot-title {
+  margin-bottom: 18px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+}
+
+.boot-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.boot-bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.boot-status {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--text-dim);
 }

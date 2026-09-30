@@ -2,7 +2,7 @@ import Decimal from 'break_infinity.js';
 import { gameConfig } from '@data/gameConfig';
 import { objectById, objectDefs } from '@data/objects';
 import { events } from './eventBus';
-import type { GameStateSnapshot, ObjectDef, OfflineEarnings, SubscriberState } from './types';
+import type { BuyMode, GameStateSnapshot, ObjectDef, OfflineEarnings, SubscriberState } from './types';
 
 /**
  * Чистая модель данных игры. Никакого DOM, никакой графики.
@@ -73,15 +73,59 @@ export class GameState {
 
   /** Покупка следующего уровня (включая первую покупку = «анлок»). */
   buyUpgrade(def: ObjectDef): boolean {
-    if (this.isMaxed(def) || !this.isUnlocked(def)) return false;
+    return this.buyUpgradeBulk(def, 'one') > 0;
+  }
 
-    const cost = this.getUpgradeCost(def);
-    if (this.money.lt(cost)) return false;
+  /**
+   * План покупки НА ОДНО действие (не меняет состояние, только считает).
+   * mode:
+   *  - 'one'  — всегда ровно один уровень;
+   *  - 'tier' — максимум того, что влезает в деньги, но не дальше КОНЦА текущего
+   *             грейда (levelsPerTier), чтобы прогресс-бар обнулился.
+   * count ≤ 0 (нельзя/не куплено/не хватает денег) — тогда cost = цена СЛЕДУЮЩЕГО
+   * уровня: UI показывает её на кнопке выключенной покупки.
+   */
+  getBuyPlan(def: ObjectDef, mode: BuyMode): { count: number; cost: Decimal } {
+    const next = this.getUpgradeCost(def);
+    if (this.isMaxed(def) || !this.isUnlocked(def) || this.money.lt(next)) {
+      return { count: 0, cost: next };
+    }
 
-    this.money = this.money.sub(cost);
-    def.currentLevel += 1; // уровень живёт в дефе — единый источник правды
+    // Грейд — каждые levelsPerTier уровней. Уровень 0 (объект не куплен) считаем
+    // НАЧАЛОМ грейда: «до конца грейда» = perTier уровней (10, 20, 30…), а не 0.
+    const perTier = gameConfig.tiers.levelsPerTier;
+    const toTierEnd = perTier - (def.currentLevel % perTier);
+    const cap = mode === 'one'
+      ? 1
+      : Math.min(toTierEnd, def.maxLevel - def.currentLevel);
+
+    let count = 1;
+    let cost = next;
+    while (count < cap) {
+      // Цена уровня (currentLevel + count) — тот же закон, что у getUpgradeCost.
+      const step = def.costBase.mul(Math.pow(def.costGrowth, def.currentLevel + count));
+      const total = cost.add(step);
+      if (this.money.lt(total)) break;
+      cost = total;
+      count += 1;
+    }
+
+    return { count, cost };
+  }
+
+  /**
+   * Покупка пачкой по плану getBuyPlan: ОДНО списание и ОДНА инвалидация кэшей,
+   * поэтому зажатая кнопка может брать десятки уровней за одно действие.
+   * Возвращает число купленных уровней (0 — покупать нельзя).
+   */
+  buyUpgradeBulk(def: ObjectDef, mode: BuyMode): number {
+    const plan = this.getBuyPlan(def, mode);
+    if (plan.count <= 0) return 0;
+
+    this.money = this.money.sub(plan.cost);
+    def.currentLevel += plan.count; // уровень живёт в дефе — единый источник правды
     this.invalidateCaches();
-    return true;
+    return plan.count;
   }
 
   // ------------------------------------------------------- потоки дохода
@@ -292,7 +336,9 @@ export class GameState {
     // Сбрасываем уровни до стартовых, затем накатываем из сейва.
     for (const o of objectDefs) o.currentLevel = o.startLevel;
     if (snap.objects) {
-      for (const [id, level] of Object.entries(snap.objects)) {
+      for (const [rawId, level] of Object.entries(snap.objects)) {
+        // Миграция id: «Лицо» переименовано в «Причёску» — прогресс переносится.
+        const id = rawId === 'face' ? 'hair' : rawId;
         const def = objectById.get(id as ObjectDef['id']);
         if (def && Number.isFinite(level) && level > 0) {
           def.currentLevel = Math.min(Math.floor(level), def.maxLevel);

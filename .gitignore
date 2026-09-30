@@ -4,3 +4,7 @@ dist
 .DS_Store
 npm-debug.log*
 vite-dev.log
+
+# Мастера текстур (тяжёлые исходники владельца). В игру и в git уезжает
+# только собранный public/assets/ — см. ASSETS.md.
+art/

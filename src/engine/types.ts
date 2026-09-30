@@ -3,10 +3,18 @@ import type Decimal from 'break_infinity.js';
 /** Группа объектов = вкладка снизу. Новая вкладка = ключ сюда + объекты в data/objects.ts. */
 export type ObjectGroup = 'property' | 'outfit' | 'workplace' | 'skills';
 
+/**
+ * Режим покупки в магазине (радио сверху выноски, выбор пользователя):
+ *  - 'one'  — строго один уровень за действие;
+ *  - 'tier' — максимум доступного на текущие деньги, но НЕ дальше конца
+ *             текущего грейда (tiers.levelsPerTier): прогресс-бар обнуляется.
+ */
+export type BuyMode = 'one' | 'tier';
+
 /** id всех прокачиваемых объектов игры. */
 export type ObjectId =
   | 'house' | 'car' | 'bg'
-  | 'watch' | 'face' | 'clothes'
+  | 'watch' | 'hair' | 'clothes'
   | 'tech' | 'pc' | 'furniture'
   | 'charisma' | 'emotion' | 'humor';
 
@@ -96,4 +104,6 @@ export type GameEventMap = {
   'subscribers:ready': undefined;
   /** Уровни объектов изменены массово (applyLevels/загрузка сейва) — сцене надо перечитать всё. */
   'objects:changed': undefined;
+  /** Период мира сменился (порог по totalEarned): фон/растительность + чип эпохи. */
+  'world:changed': { period: number; era: number };
 };

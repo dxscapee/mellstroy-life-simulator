@@ -5,24 +5,69 @@ import { Game } from '@engine/Game';
 import { formatMoney } from '@engine/format';
 import { yandexService } from '@services/yandex';
 import { buildSceneState } from '@data/objects';
+import {
+  assetGroupOf,
+  CHARACTER_ASSET_GROUP,
+  CHARACTER_ASSET_STAGE,
+  WORLD_ASSET_GROUP,
+} from '@data/assets';
 import { GameView } from '@view/GameView';
+import { AssetRegistry } from '@view/assetRegistry';
 import { UIManager } from '@ui/UIManager';
+import { BootScreen } from '@ui/BootScreen';
 
 const canvasHost = document.getElementById('canvas-host')!;
 const uiRoot = document.getElementById('ui-root')!;
 
 let game: Game | null = null;
 
+/**
+ * Ключи стартового набора: фон текущей эпохи, тело игрока и текстуры всех
+ * купленных сценовых объектов на их текущих стадиях. Ключи резолвятся реестром
+ * (с откатом вниз), поэтому грузим ИМЕННО то, что будет показано. Это
+ * происходит до LoadingAPI.ready() (загрузочный экран); остальное — лениво.
+ */
+function startupAssetKeys(assets: AssetRegistry): string[] {
+  if (!game) return [];
+
+  const keys: string[] = [];
+  const characterKey = assets.resolveKey(CHARACTER_ASSET_GROUP, CHARACTER_ASSET_STAGE);
+  if (characterKey) keys.push(characterKey);
+
+  const worldKey = assets.resolveKey(WORLD_ASSET_GROUP, game.worldWatch.stage.era);
+  if (worldKey) keys.push(worldKey);
+
+  for (const state of buildSceneState()) {
+    if (!state.owned) continue;
+    const group = assetGroupOf(state.id);
+    if (!group) continue;
+    const key = assets.resolveKey(group, state.tier);
+    if (key) keys.push(key);
+  }
+  return keys;
+}
+
 async function bootstrap(): Promise<void> {
+  const boot = new BootScreen();
+
   // 1) Ядро: состояние + сейв + офлайн-доход (модалка уйдёт событием).
   game = new Game();
 
-  // 2) Слой Pixi: тапы по холсту = активный доход.
-  const view = new GameView(canvasHost, (x, y) => {
+  // 2) Слой Pixi + рантайм-загрузчик текстур (манифест — assets/manifest.json).
+  const assets = new AssetRegistry();
+  const view = new GameView(canvasHost, assets, (x, y) => {
     const amount = game!.handleTap();
     view.spawnMoneyText(formatMoney(amount), x, y);
   });
-  await view.init();
+
+  // SDK платформы грузится параллельно с ассетами; ready() скажем в конце.
+  const platformReady = yandexService.init();
+
+  await Promise.all([view.init(), assets.init()]);
+
+  // 3) Стартовые текстуры — под загрузочным экраном.
+  const keys = startupAssetKeys(assets);
+  await assets.preload(keys, (done, total) => boot.setProgress(done, total));
 
   // Сцена отражает состояние объектов: тиры, владение тачкой, подписи стадий.
   view.applySceneState(buildSceneState());
@@ -31,7 +76,11 @@ async function bootstrap(): Promise<void> {
   // Массовые изменения (applyLevels из дебага, загрузка сейва) — сцена перечитывает всё.
   events.on('objects:changed', refreshScene);
 
-  // 3) Слой UI.
+  // Мир: стадии применяются и на старте, и при смене периода (фон).
+  view.applyWorldStage(game.worldWatch.stage.era);
+  events.on('world:changed', ({ era }) => view.applyWorldStage(era));
+
+  // 4) Слой UI.
   const ui = new UIManager(uiRoot, game);
 
   // Офлайн-модалка: подписка на будущее + учёт уже случившегося (событие
@@ -43,16 +92,21 @@ async function bootstrap(): Promise<void> {
     ui.modal.show(game.pendingOfflineModal.title, game.pendingOfflineModal.body);
   }
 
-  // 4) Платформа: SDK + сигнал готовности.
-  await yandexService.init();
+  // 5) Платформа: LoadingAPI.ready() только когда игра одета и собрана.
+  await platformReady;
   yandexService.gameplayStart();
 
-  // 5) Игровой цикл запускаем последним — когда всё готово принимать тики.
+  // 6) Игровой цикл запускаем последним — когда всё готово принимать тики.
   game.loop.start();
+  boot.hide();
 
-  // Доступ из консоли для ручных экспериментов — только в dev.
+  // Доступ из консоли для ручных экспериментов — только в dev
+  // (в проде ветка мертва; см. ASSETS.md, раздел про отладку ассетов).
   if (import.meta.env.DEV) {
-    (window as unknown as Record<string, unknown>).game = game;
+    const handles = window as unknown as Record<string, unknown>;
+    handles.game = game;
+    handles.assets = assets;
+    handles.scene = view;
     console.info('%c[App] Игра запущена', 'color:#2ecc71;font-weight:bold');
   }
 }

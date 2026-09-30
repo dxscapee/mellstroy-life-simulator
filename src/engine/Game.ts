@@ -6,7 +6,8 @@ import { GameState } from './GameState';
 import { GameLoop } from './GameLoop';
 import { OfflineProgress } from './OfflineProgress';
 import { SaveManager } from './SaveManager';
-import type { ObjectDef } from './types';
+import { WorldWatch } from './WorldProgress';
+import type { BuyMode, ObjectDef } from './types';
 
 /**
  * Фасад ядра: связывает состояние, цикл, сейвы и офлайн-доход.
@@ -26,6 +27,8 @@ export class Game {
   private saveTimer = 0;
   /** Таймер пассивного прироста подписчиков (раз в gameConfig.subscribers.addIntervalSec). */
   private subscriberTimer = 0;
+  /** Наблюдатель периода мира: UI и сцена читают .stage, аллокаций на тике нет. */
+  readonly worldWatch = new WorldWatch();
   private saveOnHideBound = this.handleVisibilityChange.bind(this);
 
   constructor() {
@@ -54,6 +57,9 @@ export class Game {
       this.state.recalculatePassiveIncome();
     }
 
+    // Стадия мира на старте (сейв мог быть далеко в прогрессе).
+    this.worldWatch.update(this.state.totalEarned);
+
     events.emit('money:changed', undefined);
   }
 
@@ -73,6 +79,13 @@ export class Game {
 
   private tick(dt: number): void {
     this.state.applyIncomeForDuration(dt);
+
+    // Период мира: проверка раз в тик — примитивное сравнение period, без аллокаций.
+    // Растёт и от пассива, и от тапов: применённый доход уже в totalEarned.
+    if (this.worldWatch.update(this.state.totalEarned)) {
+      const s = this.worldWatch.stage;
+      events.emit('world:changed', { period: s.period, era: s.era });
+    }
 
     // Пассивный прирост подписчиков: раз в интервал капает пассивный доход за него.
     this.subscriberTimer += dt;
@@ -123,12 +136,18 @@ export class Game {
     return reward;
   }
 
-  /** Покупка уровня объекта. Возвращает деф, если покупка состоялась. */
-  buyObject(id: string): ObjectDef | null {
+  /**
+   * Покупка уровней объекта. mode — режим магазина ('one' — один уровень,
+   * 'tier' — до конца текущего грейда на доступные деньги, см. BuyMode).
+   * События эмитятся ОДИН раз на всю пачку (иначе зажатая кнопка спамит шину):
+   * сцена получает одно 'object:levelup', карточки/HUD обновятся на ближайшем тике.
+   * Возвращает деф, если покупка состоялась.
+   */
+  buyObject(id: string, mode: BuyMode = 'one'): ObjectDef | null {
     const def = objectById.get(id as ObjectDef['id']);
     if (!def) return null;
 
-    if (!this.state.buyUpgrade(def)) return null;
+    if (this.state.buyUpgradeBulk(def, mode) <= 0) return null;
 
     events.emit('object:levelup', def);
     events.emit('money:changed', undefined);
@@ -147,11 +166,27 @@ export class Game {
 
     events.emit('game:reset', undefined);
     events.emit('money:changed', undefined);
+
+    // Мир откатывается в нулевой период: сцена и чип эпохи перечитываются.
+    this.worldWatch.update(this.state.totalEarned);
+    const s = this.worldWatch.stage;
+    events.emit('world:changed', { period: s.period, era: s.era });
   }
 
   /** В dev-режиме дебаг-панель может ускорять время. В проде — no-op. */
   setTimeScale(scale: number): void {
     this.loop.speedScale = Math.max(0.1, scale);
+  }
+
+  /**
+   * Пересинхронизация UI после ПРЯМЫХ мутаций state из dev-инструментов
+   * (undo денег и т.п.): мир перечитает стадию, HUD перерисуется.
+   */
+  refreshAfterDebug(): void {
+    this.worldWatch.update(this.state.totalEarned);
+    const s = this.worldWatch.stage;
+    events.emit('world:changed', { period: s.period, era: s.era });
+    events.emit('money:changed', undefined);
   }
 
   destroy(): void {

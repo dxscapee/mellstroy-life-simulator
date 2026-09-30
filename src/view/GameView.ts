@@ -8,6 +8,10 @@ import {
   TextStyle,
 } from 'pixi.js';
 import type { SceneObjectInfo } from '@data/objects';
+import type { AssetGroup } from '@data/assets';
+import { SCENE_GROUPS, WORLD_ASSET_GROUP } from '@data/assets';
+import { WorldLayer } from './WorldLayer';
+import type { AssetRegistry } from './assetRegistry';
 
 interface FloatText {
   node: Text;
@@ -17,37 +21,224 @@ interface FloatText {
 }
 
 /**
+ * ЗАКОН РАСКЛАДКИ СЦЕНЫ v2 (чертёж владельца 2026-09-29, уточнён 2026-09-30).
+ *
+ * Эталонная композиция — вертикальный экран SCENE_REF_W × SCENE_REF_H
+ * (1120×1505), все координаты сняты с чертежа. Два ТИПА объектов:
+ *
+ * СТАТИЧЕСКИЕ (фон, двор, дом) — X следует за ЦЕНТРОМ ЭКРАНА на КАЖДОМ
+ * ресайзе (фикс владельца 2026-09-30: раньше X фиксировался один раз при init,
+ * и при сужении окна дом/двор/фон «уезжали» вправо); Y — центр композиции
+ * между HUD и таб-баром. Размеры константны: непропорциональное окно срезает
+ * край объекта, но сам объект остаётся в центре.
+ *
+ * ДИНАМИЧЕСКИЕ (игрок, машина) — якорь от центра композиции; на широких окнах
+ * отъезжают от центра (жёлтые стрелки чертежа): drift = излишек ширины ×
+ * DRIFT_GAIN, потолок DRIFT_MAX_TOTAL. На узких окнах отъезд схлопывается
+ * (squeeze), центр композиции по Y садится в свободную полосу между HUD и
+ * таб-баром (только позиция, размеры не трогаются).
+ *
+ * РАБОЧЕЕ МЕСТО — динамическое и по X живёт по общему правилу (якорь + дрейф
+ * группой), но по Y СТОИТ НА ПОЛУ: низ группы — на FLOOR_GAP выше нижнего края
+ * окна, а не у центра композиции (владелец 2026-09-30).
+ *
+ * ГРУППА ИГРОКА (игрок + причёска/одежда/часы) НЕ анимируется (владелец
+ * 2026-09-30, временно): покачивание по Y и наклон сняты, остался только
+ * сквиш-отклик на тап. Разъезд по ширине окна — часть раскладки, не анимации.
+ *
+ * Все объекты — ПРЯМОУГОЛЬНИКИ-ЗАГЛУШКИ с номером и размером в px. Размеры и
+ * позиции истинные — визуальных правок геометрии нет. Когда в манифесте есть
+ * ассет (см. @data/assets и ASSETS.md), заглушка ПОДМЕНЯЕТСЯ спрайтом той же
+ * геометрии: стадия — по тиру, фон — по эпохе; загрузка ленивая, ключи резолвит
+ * AssetRegistry. Раскладка о текстурах не знает и не меняется вообще.
+ */
+
+/** Эталон композиции (весь чертёж): SCENE_REF_W×SCENE_REF_H, центр по Y. */
+export const SCENE_REF_W = 1120;
+export const SCENE_REF_H = 1505;
+
+/** Насколько px отъезда даёт каждый px излишка ширины сверх эталона. */
+const DRIFT_GAIN = 0.25;
+/** Потолок отъезда (px) — длина жёлтых стрелок чертежа. */
+const DRIFT_MAX_TOTAL = 190;
+
+/** Свободная полоса между HUD и таб-баром: посадка центра композиции по Y. */
+const TOP_FREE_MAX = 170; // HUD с тремя рядами
+const BOTTOM_FREE = 120; // таб-бар
+/** Доля свободной полосы, на которой стоит центр композиции. */
+const CY_FRAC = 0.46;
+
+/**
+ * Заглушка одного объекта: цвет/номер/размер — с чертежа.
+ * lift — подъём ПОДПИСИ (px) над верхом прямоугольника: только там, где соседние
+ * подписи иначе слились бы в одну строку (игрок↔причёска, одежда↔часы).
+ * w×h — всегда ИСТИННЫЕ габариты текстуры: визуальных правок геометрии у
+ * заглушек нет.
+ */
+interface RectSpec {
+  /** Группа ассетов: папка мастера в art/ и ключ ассета в манифесте. */
+  group: AssetGroup;
+  w: number;
+  h: number;
+  color: number;
+  num: string;
+  label: string;
+  lift?: number;
+}
+
+/**
+ * Узел сцены: прямоугольник-заглушка (gfx + метка) и спрайт текстуры.
+ * stage — ЗАПРОШЕННАЯ стадия (её ставит applySceneState/конструктор); -1 =
+ * стадия ещё не известна (до первого applySceneState ничего не грузим, иначе
+ * сцена угадывала бы нулевую стадию и тянула лишний ассет).
+ * appliedKey — ключ ассета, который сейчас реально показан (null — заглушка).
+ */
+interface RectVisual {
+  spec: RectSpec;
+  gfx: Graphics;
+  label: Text;
+  sprite: Sprite;
+  stage: number;
+  appliedKey: string | null;
+}
+
+/**
+ * Бокс объекта из паспорта ассетов (sceneAssets.json): w×h — истинные
+ * габариты текстуры и спрайта. Пайплайн валидирует мастера по этим же числам.
+ */
+const sceneBox = (group: AssetGroup): { w: number; h: number } => ({
+  w: SCENE_GROUPS[group].w,
+  h: SCENE_GROUPS[group].h,
+});
+
+/**
+ * Прямоугольники-заглушки объектов сцены: цвет, номер и размер — с чертежа.
+ * Слоям ГРУПП (игрок, рабочее место) даны СВОИ цвета, чтобы их различать
+ * (решение владельца 2026-09-30).
+ * Фон(5) живёт в WorldLayer (WORLD_REF_W/H — его размер текстуры).
+ */
+const YARD_SPEC: RectSpec = { group: 'yard', ...sceneBox('yard'), color: 0xff00aa, num: '6', label: 'ДВОР' };
+const HOUSE_SPEC: RectSpec = { group: 'house', ...sceneBox('house'), color: 0x00a844, num: '4', label: 'ДОМ' };
+const CAR_SPEC: RectSpec = { group: 'car', ...sceneBox('car'), color: 0xe01010, num: '2', label: 'МАШИНА' };
+const CHAR_SPEC: RectSpec = { group: 'character', ...sceneBox('character'), color: 0xe01010, num: '1', label: 'ИГРОК' };
+/**
+ * Рабочее место: ТРИ КОНГРУЭНТНЫХ слоя в ОДНОЙ точке, ОДНА геометрия на всех
+ * (владелец 2026-09-30: «все объекты должны быть одинаковых размеров») — бокс
+ * 350×460 (было 300 → «должны быть выше по высоте»). Слои совпадают по площади
+ * один в один, поэтому на экране читается ВЕРХНИЙ (комп, жёлтый), а размер всех
+ * трёх виден в подписях; никаких визуальных хитростей с рамками у заглушек нет.
+ * Глубина = чертёж: мебель(12) — дальний, микрофон(11) — средний, комп(10) —
+ * ближний; цвета слоёв свои (оранжевый/бирюзовый/жёлтый).
+ * lift разводит подписи колонкой над верхом: КОМП → МИКРОФОН → МЕБЕЛЬ.
+ */
+// Размеры — из паспорта ассетов; пайплайн проверяет, что три слоя конгруэнтны.
+// (раскладка стопки опирается только на высоту: низ группы стоит на полу)
+const WORKPLACE_H = SCENE_GROUPS.tech.h;
+const FURNITURE_SPEC: RectSpec = { group: 'furniture', ...sceneBox('furniture'), color: 0xf59e0b, num: '12', label: 'МЕБЕЛЬ', lift: 0 };
+const TECH_SPEC: RectSpec = { group: 'tech', ...sceneBox('tech'), color: 0x06b6d4, num: '11', label: 'МИКРОФОН', lift: 27 };
+const PC_SPEC: RectSpec = { group: 'pc', ...sceneBox('pc'), color: 0xfacc15, num: '10', label: 'КОМП', lift: 54 };
+
+/**
+ * Носимые на игроке: дети контейнера игрока, наследуют его позицию и масштаб.
+ * Раскладка — по чертежу крупным планом (владелец 2026-09-30): БОРТ К БОРТУ и
+ * без наложений. Координаты — от центра игрока (игрок 330×690: верх −345,
+ * низ +345, левый борт −165):
+ *   · ПРИЧЁСКА 330×240 — верхняя полоса игрока: впритык к верхнему, левому и
+ *     правому бортам (центр −225);
+ *   · ОДЕЖДА 330×450 — нижняя полоса: верх = низ причёски (−105), низ = низ
+ *     игрока (+345), центр +120;
+ *   · ЧАСЫ 150×215 — прижаты к ЛЕВОМУ борту (левый край −165, центр −90), верх
+ *     на 15px ниже стыка полос (верх −90, центр +17.5).
+ * Слои (глубина addChild): тело(1) → причёска(8) + одежда(9) → часы(7).
+ * Цвета: ЗЕЛЁНАЯ причёска, СИНЯЯ одежда, ФИОЛЕТОВЫЕ часы, КРАСНЫЙ игрок.
+ * lift поднимает подпись только там, где соседи слились бы (причёска↔игрок,
+ * одежда↔часы); остальные подписи стоят вплотную над своим верхом.
+ */
+const WORN_SPECS: Record<'hair' | 'clothes' | 'watch', RectSpec & { ox: number; oy: number }> = {
+  // Причёска — верхняя полоса игрока (впритык к верхнему/левому/правому бортам).
+  hair: { group: 'hair', ...sceneBox('hair'), color: 0x22c55e, num: '8', label: 'ПРИЧЁСКА', ox: 0, oy: -225, lift: 26 },
+  // Одежда — нижняя полоса игрока: верх = низ причёски, низ = низ игрока.
+  clothes: { group: 'clothes', ...sceneBox('clothes'), color: 0x2563eb, num: '9', label: 'ОДЕЖДА', ox: 0, oy: 120, lift: 11 },
+  // Часы — слева, впритык к левому борту; верх на 15px ниже стыка полос.
+  watch: { group: 'watch', ...sceneBox('watch'), color: 0xa855f7, num: '7', label: 'ЧАСЫ', ox: -90, oy: 17.5, lift: 0 },
+};
+
+/** Якорь динамического объекта: смещение от центра композиции. */
+type DynAnchor = { dx: number; dy: number };
+
+// Снято с чертежа (эталон 1120×1505, центр композиции (560, ~707)).
+// Машина придвинута к центру (владелец 2026-09-30: «на ПК очень далеко от центра»):
+// 230 → 150 → 140. Побочно упала и доля дрейфа (|dx|/400) — на широких окнах отъезд меньше.
+const CAR_ANCHOR: DynAnchor = { dx: 140, dy: 35 };
+// Игрок сдвинут правее для телефонного экрана (владелец 2026-09-30): -240 → -220.
+const CHAR_ANCHOR: DynAnchor = { dx: -220, dy: 215 };
+/**
+ * Рабочее место — ОДНА точка на все три конгруэнтных слоя. По X это стол чертежа
+ * +30 вправо (владелец 2026-09-30: «положение как у стола, но чуть-чуть правее»),
+ * сдвинуто левее для телефонного экрана: 310 → 280.
+ * По Y группа СТОИТ НА ПОЛУ — не от центра композиции, а от нижнего края окна
+ * (владелец: «начинаться от пола… около 5–10 пикселей от нижней границы»).
+ */
+const WORKPLACE_DX = 280;
+/** Просвет между низом рабочей группы и нижним краем окна (пол сцены), px. */
+const FLOOR_GAP = 8;
+
+/** Общий dx рабочей группы: все три слоя отъезжают КАК ОДНО ЦЕЛОЕ. */
+const WORKPLACE_GROUP_DX = 200;
+
+/**
+ * Статические объекты: смещение центра от ЦЕНТРА КОМПОЗИЦИИ (cy).
+ * Дом — центр чуть выше центра композиции (верх ~26% высоты, низ ~67%);
+ * двор — центр заметно ниже (верх ~35% высоты, низ ~95%): дом выглядывает
+ * из-за двора сверху, двор идёт до самого низа — как на чертеже.
+ */
+const HOUSE_DY = -25; // центр дома относительно cy
+const YARD_DY = 270; // центр двора относительно cy
+
+/** Доля отъезда (0..1) при drift = DRIFT_MAX_TOTAL — по удалённости от центра. */
+const driftShare = (dx: number): number => Math.min(1, Math.abs(dx) / 400);
+
+/**
  * Слой 1: игровая сцена Pixi. Знает только про рисование и ввод на холсте.
  * Игровую логику не трогает — наружу отдаёт колбэк onTap и методы-эффекты.
- *
- * Плейсхолдеры сценовых объектов (дом, тачка) рисуются из примитивов и
- * перекрашиваются/подписываются по тиру: при levelup тира 5, 10, 15... вид меняется.
- * Реальные спрайты/атласы подставятся вместо draw-методов позже, без смены API.
  */
 export class GameView {
   private app = new Application();
   private host: HTMLElement;
 
   private bg: Sprite | null = null;
-  private character: Container | null = null;
-  private house: Container | null = null;
-  private car: Container | null = null;
-  /** Плейсхолдеры остальных объектов: двор + рабочее место (рисуются при покупке). */
+  /** Задний слой мира (фон-прямоугольник, статический). */
+  readonly world: WorldLayer = new WorldLayer();
+  /** Статические слои: расставляются один раз (X намертво, Y — центр композиции). */
   private yard: Container | null = null;
+  private house: Container | null = null;
+  /** Динамические объекты. */
+  private car: Container | null = null;
   private workplace = new Map<string, Container>(); // tech | pc | furniture
-  /** Носимые плейсхолдеры на персонаже: watch | face | clothes (видны при покупке). */
+  private character: Container | null = null;
+  /** Носимые — дети персонажа: watch | hair | clothes. */
   private worn = new Map<string, Container>();
-  /** Подпись стадии над сценовым объектом (плейсхолдер вместо спрайтов). */
-  private stageLabels = new Map<string, Text>();
-  private charBaseX = 0;
-  private charBaseY = 0;
-  private time = 0;
+  /** Узлы сцены: контейнер → заглушка + спрайт + метка (см. RectVisual). */
+  private visuals = new Map<Container, RectVisual>();
+  /** Метка фона (отдельный текст в stage — у WorldLayer нет своих детей). */
+  private worldLabel: Text | null = null;
+  /** Отписка от «ассет догрузился» (ставится в init, снимается в destroy). */
+  private offAssets: (() => void) | null = null;
+  /** Запрошенная эпоха фона (-1 — ещё не применяли) для пере-синхронизации. */
+  private lastWorldEra = -1;
+  /** Ключ ассета, который сейчас на фоне (null — заглушка). */
+  private appliedWorldKey: string | null = null;
+
+  /** Базовый масштаб персонажа — точка возврата сквиш-эффекта при тапе. */
+  private charBaseScale = 1;
 
   /** Пул текстов «+1$»: без аллокаций на каждый тап. */
   private floatPool: FloatText[] = [];
 
   constructor(
     host: HTMLElement,
+    /** Рантайм-загрузчик текстур: создаётся в main (см. ASSETS.md). */
+    private readonly assets: AssetRegistry,
     private readonly onCanvasTap: (x: number, y: number) => void,
   ) {
     this.host = host;
@@ -63,13 +254,20 @@ export class GameView {
     });
     this.host.appendChild(this.app.canvas);
 
+    // Порядок depth: градиент → фон(мир) → двор → дом → машина/рабочее место/игрок.
     this.buildBackground();
+    this.buildWorld();
     this.buildYard();
     this.buildHouse();
     this.buildCar();
     this.buildWorkplace();
     this.buildCharacter();
     this.buildWorn();
+
+    // Ленивая загрузка: догрузившиеся текстуры сами подменяют заглушки.
+    this.offAssets = this.assets.onLoaded(() => this.refreshTextures());
+    // Тело игрока — единственная стадия (в состояниях объектов его нет).
+    this.setStage(this.character, 0);
 
     // Ввод: вся сцена кликабельна, тапы «пробивают» с HTML-оверлея
     // (у оверлея pointer-events: none, у холста — auto).
@@ -82,9 +280,10 @@ export class GameView {
       this.onCanvasTap(x, y);
     });
 
-    this.app.renderer.on('resize', () => this.layout());
+    // Единый закон раскладки (статику центрирует, динамику сажает по якорям).
     this.layout();
 
+    this.app.renderer.on('resize', () => this.layout());
     this.app.ticker.add((ticker) => this.update(ticker.deltaMS / 1000));
   }
 
@@ -109,192 +308,129 @@ export class GameView {
     this.app.stage.addChild(this.bg);
   }
 
-  /** Дом-плейсхолдер: перекрашивается по тиру, подпись — название стадии. */
-  private buildHouse(): void {
-    const c = new Container();
-
-    const body = new Graphics();
-    body.rect(-90, -40, 180, 110).fill(0x3d4a5c);
-    c.addChild(body);
-
-    const roof = new Graphics();
-    roof.poly([-100, -40, 0, -110, 100, -40]).fill(0x8c5a3c);
-    c.addChild(roof);
-
-    const door = new Graphics();
-    door.roundRect(-18, 10, 36, 60, 4).fill(0x2a323d);
-    c.addChild(door);
-
-    this.house = c;
-    this.app.stage.addChild(c);
+  /** Задний слой мира: прямоугольник фона (статический, дальний). */
+  private buildWorld(): void {
+    this.world.init(this.app.screen.width, this.app.screen.height);
+    this.app.stage.addChildAt(this.world.root, this.app.stage.getChildIndex(this.bg!) + 1);
   }
 
-  /** Тачка-плейсхолдер: видна только после покупки (уровень >= 1). */
-  private buildCar(): void {
+  /** Прямоугольник-заглушка одного объекта: цвет/номер/размер — с чертежа. */
+  private buildRect(spec: RectSpec): Container {
     const c = new Container();
 
-    const bodyG = new Graphics();
-    bodyG.roundRect(-70, -22, 140, 34, 10).fill(0xc0392b);
-    c.addChild(bodyG);
-
-    const cabin = new Graphics();
-    cabin.roundRect(-40, -46, 70, 30, 8).fill(0xc0392b);
-    c.addChild(cabin);
-
-    const w1 = new Graphics();
-    w1.circle(-42, 14, 14).fill(0x1a1d21);
-    c.addChild(w1);
-
-    const w2 = new Graphics();
-    w2.circle(44, 14, 14).fill(0x1a1d21);
-    c.addChild(w2);
-
-    c.visible = false; // тачка появляется после первой покупки
-    this.car = c;
-    this.app.stage.addChild(c);
-  }
-
-  /**
-   * Двор-плейсхолдер (просто фигура за домом; позже — многослойный фон).
-   * Зависит от тира: пустырь (перекрестье) → асфальт (серый) → паркет (теплый).
-   */
-  private buildYard(): void {
-    const c = new Container();
     const g = new Graphics();
-    g.roundRect(-130, -90, 260, 180, 12).fill(0x2a333f);
-    // «Перекрестье» — метка пустыря, чтобы объект был виден даже на тире 0.
-    g.moveTo(-90, 0).lineTo(90, 0).moveTo(0, -55).lineTo(0, 55)
-      .stroke({ width: 3, color: 0x3a4655 });
-    g.roundRect(-130, -90, 260, 180, 12).stroke({ width: 3, color: 0x3a4655 });
+    g.rect(-spec.w / 2, -spec.h / 2, spec.w, spec.h).fill({ color: spec.color, alpha: 0.55 });
+    g.rect(-spec.w / 2, -spec.h / 2, spec.w, spec.h).stroke({ width: 3, color: spec.color });
     c.addChild(g);
 
-    c.visible = false; // появляется после покупки
-    this.yard = c;
-    this.app.stage.addChild(c);
+    // Спрайт подменяемой текстуры: та же геометрия, что у заглушки, —
+    // раскладка о текстурах ничего не знает (см. syncVisual).
+    const sprite = new Sprite();
+    sprite.anchor.set(0.5);
+    sprite.visible = false;
+    c.addChild(sprite);
+
+    // Метка: номер из чертежа + название + размер текстуры в px.
+    // Центр-верх прямоугольника: метка видна, даже когда края объекта
+    // выходят за окно (по чертежу они и должны выходить). lift поднимает
+    // подпись в стопке конгруэнтных слоёв.
+    const mark = new Text({
+      text: `${spec.num} · ${spec.label} · ${spec.w}×${spec.h}`,
+      style: this.markerStyle(),
+    });
+    mark.anchor.set(0.5, 1);
+    mark.position.set(0, Math.round(-spec.h / 2) - 6 - (spec.lift ?? 0));
+    c.addChild(mark);
+    this.visuals.set(c, { spec, gfx: g, label: mark, sprite, stage: -1, appliedKey: null });
+
+    return c;
   }
 
-  /** Рабочее место: микрофон/комп/мебель — три отдельных плейсхолдера. */
-  private buildWorkplace(): void {
-    // Микрофон: капсула на стойке (тир 0) → студийный (тир 1) → золотой (тир 2).
-    const tech = new Container();
-    const tCapsule = new Graphics();
-    tCapsule.roundRect(-11, -44, 22, 32, 11).fill(0x56657a);
-    tech.addChild(tCapsule);
-    const tGrill = new Graphics();
-    tGrill.roundRect(-8, -41, 16, 12, 5).fill(0x22303d);
-    tech.addChild(tGrill);
-    const tHolder = new Graphics();
-    tHolder.roundRect(-6, -12, 12, 12, 3).fill(0x3a4655);
-    tech.addChild(tHolder);
-    const tStand = new Graphics();
-    tStand.rect(-2.5, 0, 5, 42).fill(0x3a4655);
-    tStand.roundRect(-16, 42, 32, 6, 3).fill(0x3a4655);
-    tech.addChild(tStand);
-    this.workplace.set('tech', tech);
+  /** Двор — средний1 слой, статический. */
+  private buildYard(): void {
+    this.yard = this.buildRect(YARD_SPEC);
+    this.yard.visible = false; // появляется после покупки
+    this.app.stage.addChild(this.yard);
+  }
 
-    // Комп: монитор на подставке.
-    const pc = new Container();
-    const pScreen = new Graphics();
-    pScreen.roundRect(-36, -30, 72, 48, 6).fill(0x1c2632);
-    pc.addChild(pScreen);
-    const pGlow = new Graphics();
-    pGlow.roundRect(-30, -24, 60, 36, 4).fill(0x39c2ff);
-    pGlow.alpha = 0.85;
-    pc.addChild(pGlow);
-    const pStand = new Graphics();
-    pStand.rect(-4, 18, 8, 14).fill(0x2c3846);
-    pStand.roundRect(-18, 30, 36, 6, 3).fill(0x2c3846);
-    pc.addChild(pStand);
-    this.workplace.set('pc', pc);
+  /** Дом — средний2 слой, статический, частично за машиной. */
+  private buildHouse(): void {
+    this.house = this.buildRect(HOUSE_SPEC);
+    this.app.stage.addChild(this.house);
+  }
 
-    // Мебель: стул.
-    const furniture = new Container();
-    const fBack = new Graphics();
-    fBack.roundRect(-18, -34, 36, 40, 5).fill(0x7a5a3a);
-    furniture.addChild(fBack);
-    const fSeat = new Graphics();
-    fSeat.roundRect(-22, 4, 44, 12, 4).fill(0x8c6a46);
-    furniture.addChild(fSeat);
-    const fLegs = new Graphics();
-    fLegs.moveTo(-18, 16).lineTo(-18, 46).moveTo(18, 16).lineTo(18, 46)
-      .stroke({ width: 5, color: 0x5d4429 });
-    furniture.addChild(fLegs);
-    this.workplace.set('furniture', furniture);
-
-    for (const item of this.workplace.values()) {
-      item.visible = false; // появляется после покупки
-      this.app.stage.addChild(item);
-    }
+  /** Машина — передний слой, динамическая (отъезжает по жёлтой стрелке). */
+  private buildCar(): void {
+    this.car = this.buildRect(CAR_SPEC);
+    this.car.visible = false; // появляется после покупки
+    this.app.stage.addChild(this.car);
   }
 
   /**
-   * Носимые плейсхолдеры на персонаже. addChild идёт ПОСЛЕ character,
-   * поэтому они рисуются поверх тела (см. layout: те же координаты + офсеты).
+   * Рабочее место: мебель(12) → микрофон(11) → комп(10), все динамические.
+   * Порядок addChild = ГЛУБИНА (мебель дальняя, комп ближний) — по чертежу
+   * владельца; геометрия у всех трёх одна (см. WORKPLACE_ANCHOR).
    */
-  private buildWorn(): void {
-    // Часы — на «запястье» (правый низ тела).
-    const watch = new Container();
-    const wStrap = new Graphics();
-    wStrap.roundRect(0, 0, 10, 26, 4).fill(0x22303d);
-    watch.addChild(wStrap);
-    const wFace = new Graphics();
-    wFace.circle(5, 13, 9).fill(0xf1c40f);
-    watch.addChild(wFace);
-    this.worn.set('watch', watch);
+  private buildWorkplace(): void {
+    const furniture = this.buildRect(FURNITURE_SPEC);
+    const tech = this.buildRect(TECH_SPEC);
+    const pc = this.buildRect(PC_SPEC);
 
-    // Лицо — «очки поверх» (тир 0 — просто улыбка-заглушка).
-    const face = new Container();
-    const fSmile = new Graphics();
-    fSmile.arc(0, 0, 14, 0.35, Math.PI - 0.35).stroke({ width: 4, color: 0xb98a54 });
-    face.addChild(fSmile);
-    this.worn.set('face', face);
+    this.workplace.set('furniture', furniture);
+    this.workplace.set('tech', tech);
+    this.workplace.set('pc', pc);
 
-    // Шмот — «цепь» на груди (видна поверх тела; толще — заметнее на зелёном).
-    const clothes = new Container();
-    const chain = new Graphics();
-    chain.moveTo(-30, 26).quadraticCurveTo(0, 46, 30, 26).stroke({ width: 6, color: 0xf7d774 });
-    chain.circle(0, 40, 6).fill(0xf7d774); // кулон
-    clothes.addChild(chain);
-    this.worn.set('clothes', clothes);
-
-    for (const item of this.worn.values()) {
+    for (const item of [furniture, tech, pc]) {
       item.visible = false; // появляется после покупки
       this.app.stage.addChild(item);
     }
   }
 
-  /** Заглушка персонажа из примитивов — позже заменится на спрайты/атлас. */
+  /** Игрок (1): прямоугольник тела; носимые — дети, см. buildWorn. */
   private buildCharacter(): void {
-    const c = new Container();
-
-    // Тело (худи).
-    const body = new Graphics();
-    body.roundRect(-42, 20, 84, 96, 14).fill(0x2ecc71);
-    c.addChild(body);
-
-    // Голова.
-    const head = new Graphics();
-    head.circle(0, -14, 34).fill(0xf1c27d);
-    c.addChild(head);
-
-    // Кепка.
-    const cap = new Graphics();
-    cap.roundRect(-36, -52, 72, 18, 9).fill(0x34495e);
-    cap.rect(-36, -40, 72, 7).fill(0x2c3e50);
-    cap.rect(4, -46, 44, 9).fill(0x2c3e50);
-    c.addChild(cap);
-
-    // Очки.
-    const glasses = new Graphics();
-    glasses.rect(-26, -22, 22, 10).fill(0x111111);
-    glasses.rect(4, -22, 22, 10).fill(0x111111);
-    c.addChild(glasses);
-
-    this.character = c;
-    this.app.stage.addChild(c);
+    this.character = this.buildRect(CHAR_SPEC);
+    this.app.stage.addChild(this.character);
   }
 
-  /** Раскладка элементов под текущий размер холста. */
+  /**
+   * Носимые — ДЕТИ персонажа: наследуют его позицию и масштаб, поэтому сквиш
+   * при тапе двигает их вместе с телом (idle-покачивание снято владельцем
+   * 2026-09-30 — позиция группы игрока заморожена).
+   * Порядок addChild: причёска(8) и одежда(9) — один слой, часы(7) — поверх.
+   */
+  private buildWorn(): void {
+    if (!this.character) return;
+
+    const hair = this.buildWornRect(WORN_SPECS.hair);
+    const clothes = this.buildWornRect(WORN_SPECS.clothes);
+    const watch = this.buildWornRect(WORN_SPECS.watch);
+
+    this.worn.set('hair', hair);
+    this.worn.set('clothes', clothes);
+    this.worn.set('watch', watch);
+
+    // addChild ПОСЛЕ тела: причёска/одежда поверх тела, часы — последними.
+    for (const item of this.worn.values()) {
+      item.visible = false; // появляется после покупки
+      this.character.addChild(item);
+    }
+  }
+
+  /** Носимый прямоугольник: тот же формат метки, позиция — офсет от центра тела. */
+  private buildWornRect(spec: RectSpec & { ox: number; oy: number }): Container {
+    const c = this.buildRect(spec);
+    c.position.set(spec.ox, spec.oy);
+    return c;
+  }
+
+  // ------------------------------------------------------------- раскладка
+
+  /**
+   * ЕДИНЫЙ ЗАКОН РАСКЛАДКИ (init + каждый ресайз): статика центрируется по X
+   * экрана, динамика садится по якорям от центра композиции (дрейф на широких
+   * окнах, squeeze на узких), а рабочее место по Y СТОИТ НА ПОЛУ (FLOOR_GAP от
+   * нижнего края окна). Размеры объектов константны — зума сцены нет.
+   */
   private layout(): void {
     const w = this.app.screen.width;
     const h = this.app.screen.height;
@@ -304,160 +440,259 @@ export class GameView {
       this.bg.height = h;
     }
 
-    if (this.house) {
-      this.house.x = w * 0.5;
-      this.house.y = h * 0.34;
-    }
+    // Фон: тот же центр + cover под ТЕКУЩИЙ экран (иначе при сужении окна
+    // он, как и статика, «уезжал» вправо — баг владельца 2026-09-30).
+    this.world.layout(w, h);
 
-    if (this.car) {
-      this.car.x = w * 0.24;
-      this.car.y = h * 0.78;
-    }
+    // Статика: X ВСЕГДА центр экрана; Y — центр композиции между HUD и таб-баром.
+    const cx = w * 0.5;
+    const cy = this.compositionCenterY(h);
+    if (this.yard) this.yard.position.set(cx, cy + YARD_DY);
+    if (this.house) this.house.position.set(cx, cy + HOUSE_DY);
 
-    if (this.character) {
-      this.charBaseX = w * 0.62;
-      this.charBaseY = h * 0.62;
-      this.character.x = this.charBaseX;
-      this.character.y = this.charBaseY;
-    }
+    // Метки статики не должны прятаться под HUD: если верх прямоугольника
+    // ушёл за панель, метка садится на первую видимую строку.
+    const labelTopLimit = Math.min(TOP_FREE_MAX, h * 0.24) + 34;
+    this.clampMarkerTop(this.house, labelTopLimit);
+    this.clampMarkerTop(this.yard, labelTopLimit);
 
-    // Двор — за домом (чуть больше и ниже).
-    if (this.yard) {
-      this.yard.x = this.house?.x ?? w * 0.5;
-      this.yard.y = (this.house?.y ?? h * 0.34) + 40;
-    }
+    const extra = Math.max(0, w - SCENE_REF_W);
+    const drift = Math.min(DRIFT_MAX_TOTAL, extra * DRIFT_GAIN);
+    const squeeze = Math.min(1, w / SCENE_REF_W);
 
-    // Рабочее место — нижний ряд; тачка поднята выше, чтобы не толкаться с техникой.
-    const wpY = h * 0.84;
-    if (this.car) {
-      this.car.x = w * 0.16;
-      this.car.y = h * 0.68;
-    }
-    if (this.workplace.size) {
-      // Порядок по ТЗ: стул → монитор → микрофон.
-      this.workplace.get('furniture')!.position.set(w * 0.26, wpY);
-      this.workplace.get('pc')!.position.set(w * 0.47, wpY - 8);
-      this.workplace.get('tech')!.position.set(w * 0.68, wpY);
-    }
+    const driftOffset = (shareDx: number): number =>
+      Math.sign(shareDx || 1) * drift * driftShare(shareDx);
+    // Рабочее место — ОДИН дрейф на все три слоя: группа отъезжает целиком
+    // и слои не расползаются при ресайзе (якорь у них теперь общий).
+    const workplaceDrift = driftOffset(WORKPLACE_GROUP_DX);
+    const place = (item: Container | null, a: DynAnchor, driftX: number): void => {
+      if (!item) return;
+      item.x = cx + a.dx * squeeze + driftX;
+      item.y = cy + a.dy;
+    };
 
-    // Носимые следуют за персонажем (с учётом его idle-покачивания в update).
-    this.syncWornPositions();
+    place(this.car, CAR_ANCHOR, driftOffset(CAR_ANCHOR.dx));
+    place(this.character, CHAR_ANCHOR, driftOffset(CHAR_ANCHOR.dx));
 
-    // Подписи стадий следуют за своими объектами.
-    this.stageLabels.get('house')?.position.set(this.house?.x ?? 0, (this.house?.y ?? 0) - 130);
-    this.stageLabels.get('car')?.position.set(this.car?.x ?? 0, (this.car?.y ?? 0) - 70);
-    this.stageLabels.get('bg')?.position.set(this.yard?.x ?? 0, (this.yard?.y ?? 0) - 105);
-    this.stageLabels.get('furniture')?.position.set(w * 0.26, wpY - 70);
-    this.stageLabels.get('pc')?.position.set(w * 0.47, wpY - 68);
-    this.stageLabels.get('tech')?.position.set(w * 0.68, wpY - 70);
+    // Рабочее место: три конгруэнтных слоя в ОДНОЙ точке, дрейф — общей группой;
+    // по Y группа СТОИТ НА ПОЛУ (низ — FLOOR_GAP над нижним краем окна).
+    this.placeWorkplace(cx + WORKPLACE_DX * squeeze + workplaceDrift, h - FLOOR_GAP - WORKPLACE_H / 2);
+
+    this.placeWorldLabel();
   }
 
-  /** Носимые держатся на персонаже (офсеты от его базовой точки). */
-  private syncWornPositions(): void {
-    if (!this.character) return;
-    const x = this.charBaseX;
-    const y = this.charBaseY;
-    this.worn.get('watch')?.position.set(x + 30, y + 66);   // запястье
-    this.worn.get('face')?.position.set(x, y - 6);          // на голове
-    this.worn.get('clothes')?.position.set(x, y + 30);      // грудь
+  /**
+   * Рабочее место — один X и один Y на все три слоя: слои конгруэнтны и стоят
+   * друг на друге, разъезжаться при раскладке им нельзя (иначе стопка развалится).
+   */
+  private placeWorkplace(x: number, y: number): void {
+    const furniture = this.workplace.get('furniture');
+    const tech = this.workplace.get('tech');
+    const pc = this.workplace.get('pc');
+    if (furniture) furniture.position.set(x, y);
+    if (tech) tech.position.set(x, y);
+    if (pc) pc.position.set(x, y);
   }
+
+  /**
+   * Метка фона (5 · ФОН · 1120×1505) — у нижнего-левого угла прямоугольника
+   * фона (верх занят HUD, верхний угол часто за краем из-за cover).
+   */
+  private placeWorldLabel(): void {
+    const text = `5 · ФОН · ${SCENE_GROUPS.world.w}×${SCENE_GROUPS.world.h}`;
+    if (!this.worldLabel) {
+      this.worldLabel = new Text({ text, style: this.markerStyle() });
+      this.worldLabel.anchor.set(0, 1);
+      this.app.stage.addChild(this.worldLabel);
+    } else if (this.worldLabel.text !== text) {
+      this.worldLabel.text = text;
+    }
+    const h = this.app.screen.height;
+    const tl = this.world.topLeftOnScreen;
+    // Клампим в окно: метка — сервисная подпись, не статический объект.
+    this.worldLabel.position.set(Math.max(8, tl.x + 8), h - 8);
+  }
+
+  /**
+   * Кламп метки статического объекта: её низ сидит над верхом прямоугольника,
+   * но не выше topLimit (нижний край HUD). Контейнер не масштабируется,
+   * поэтому локальная координата = экранная − y контейнера.
+   */
+  private clampMarkerTop(item: Container | null, topLimit: number): void {
+    if (!item) return;
+    const rec = this.visuals.get(item);
+    if (!rec) return;
+    const rectTop = item.y - rec.spec.h / 2;
+    rec.label.y = Math.max(rectTop - 6, topLimit + 4) - item.y;
+  }
+
+  /** Общий стиль меток-подписей. */
+  private markerStyle(): TextStyle {
+    return new TextStyle({
+      fontFamily: 'Arial, sans-serif',
+      fontSize: 20,
+      fontWeight: '700',
+      fill: 0xffffff,
+      stroke: { color: 0x0b0e12, width: 4 },
+    });
+  }
+
+  /** Центр композиции по Y: свободная полоса между HUD и таб-баром. */
+  private compositionCenterY(h: number): number {
+    const topFree = Math.min(TOP_FREE_MAX, h * 0.24);
+    const usable = Math.max(120, h - topFree - BOTTOM_FREE);
+    return Math.round(topFree + usable * CY_FRAC);
+  }
+
+  /**
+   * Применить эпоху мира (смена раз в 2 периода; зовёт main при 'world:changed'
+   * и один раз на старте). Фон подменяется текстурой world/<эпоха>: пока новая
+   * грузится — на экране текущая текстура или заглушка; после подмены прошлый
+   * фон освобождается (если это BG-видео, это живой видеодекодер).
+   */
+  applyWorldStage(era: number): void {
+    this.lastWorldEra = era;
+
+    const key = this.assets.resolveKey(WORLD_ASSET_GROUP, era);
+    if (!key) {
+      // Ассетов фона нет вовсе — возвращаем заглушку.
+      if (this.appliedWorldKey) {
+        this.assets.release(this.appliedWorldKey);
+        this.appliedWorldKey = null;
+      }
+      this.world.setTexture(null);
+      this.setWorldLabelVisible(true);
+      return;
+    }
+
+    const texture = this.assets.texture(key);
+    if (!texture || this.appliedWorldKey === key) return;
+
+    this.world.setTexture(texture);
+    if (this.appliedWorldKey) this.assets.release(this.appliedWorldKey);
+    this.appliedWorldKey = key;
+    this.setWorldLabelVisible(false);
+  }
+
+  /** Метка фона видна только на заглушке (как и подписи объектов). */
+  private setWorldLabelVisible(visible: boolean): void {
+    if (this.worldLabel) this.worldLabel.visible = visible;
+  }
+
+  // ---------------------------------------------------------------- текстуры
+
+  /** Пере-синхронизация всех видимых узлов и фона после догрузки ассетов. */
+  refreshTextures(): void {
+    for (const [container, rec] of this.visuals) {
+      if (container.visible) this.syncVisual(rec);
+    }
+    // До первого applyWorldStage эпоха неизвестна — фон не трогаем.
+    if (this.lastWorldEra >= 0) this.applyWorldStage(this.lastWorldEra);
+  }
+
+  /** Запомнить запрошенную стадию узла и сразу попробовать подменить текстуру. */
+  private setStage(container: Container | null, stage: number): void {
+    if (!container) return;
+    const rec = this.visuals.get(container);
+    if (!rec) return;
+    rec.stage = stage;
+    if (container.visible) this.syncVisual(rec);
+  }
+
+  /**
+   * Подмена заглушки текстурой: ключ резолвится с откатом вниз (нет файла
+   * стадии N — берётся ближайшая младшая). Ассета нет вовсе — остаётся
+   * заглушка. Ассет есть, но ещё грузится — ничего не трогаем: по завершении
+   * onLoaded позовёт refreshTextures.
+   */
+  private syncVisual(rec: RectVisual): void {
+    if (rec.stage < 0) return; // стадия ещё не задана состоянием сцены
+    const key = this.assets.resolveKey(rec.spec.group, rec.stage);
+    if (!key) {
+      if (rec.appliedKey) this.showPlaceholder(rec);
+      return;
+    }
+
+    const texture = this.assets.texture(key);
+    if (!texture || rec.appliedKey === key) return;
+
+    rec.sprite.texture = texture;
+    // Размер спрайта ставится КАЖДЫЙ раз: у текстур разного разрешения своя
+    // натуральная величина, width/height нормируют её в истинный бокс сцены.
+    rec.sprite.width = rec.spec.w;
+    rec.sprite.height = rec.spec.h;
+    rec.sprite.visible = true;
+    rec.gfx.visible = false;
+    rec.label.visible = false;
+    rec.appliedKey = key;
+  }
+
+  /** Вернуть узел к прямоугольнику-заглушке (ассет исчез из манифеста). */
+  private showPlaceholder(rec: RectVisual): void {
+    rec.sprite.visible = false;
+    rec.gfx.visible = true;
+    rec.label.visible = true;
+    rec.appliedKey = null;
+  }
+
+  // ------------------------------------------------------------ тиры сцены
 
   // ------------------------------------------------------------ тиры сцены
 
   /**
    * Применить визуальное состояние сцены по уровням объектов.
-   * Вызывается из main при 'object:levelup' и один раз на старте.
+   * Плейсхолдеры — прямоугольники: тиры пока НИЧЕГО не меняют визуально
+   * (перекраски-тинты убраны до текстур). Меняется только владение (visible).
    */
   applySceneState(states: SceneObjectInfo[]): void {
     for (const s of states) {
       switch (s.id) {
-        case 'house': {
-          // Плейсхолдер: тир = перекраска контейнера (спрайты стадий придут позже).
-          const tints = [0x3d4a5c, 0x5d6d80, 0x8fa3b8, 0xd8c690]; // коробка → пентхаус
-          if (this.house) this.house.tint = tints[Math.min(s.tier, tints.length - 1)];
-          this.ensureStageLabel('house', s.stageName);
+        case 'house':
+          // Дом не покупается (startLevel 1) — видимость не трогаем, только стадию.
+          this.setStage(this.house, s.tier);
           break;
-        }
-        case 'car': {
-          if (this.car) this.car.visible = s.owned;
-          this.toggleStageLabel('car', s.owned, s.stageName);
+        case 'car':
+          if (this.car) {
+            this.car.visible = s.owned;
+            if (s.owned) this.setStage(this.car, s.tier);
+          }
           break;
-        }
-        case 'bg': {
-          // Двор: тир = перекраска (пустырь → асфальт → паркет).
-          const yardTints = [0x2a333f, 0x46525f, 0x8a6f4d];
+        case 'bg':
           if (this.yard) {
             this.yard.visible = s.owned;
-            this.yard.tint = yardTints[Math.min(s.tier, yardTints.length - 1)];
+            if (s.owned) this.setStage(this.yard, s.tier);
           }
-          this.toggleStageLabel('bg', s.owned, s.stageName);
           break;
-        }
         case 'tech':
         case 'pc':
         case 'furniture': {
-          // Рабочее место: тир = смена акцентного цвета заглушки.
           const item = this.workplace.get(s.id);
           if (item) {
             item.visible = s.owned;
-            const wpTints = [0xffffff, 0x9fffcf, 0xffd97a]; // тир-акцент через tint
-            item.tint = wpTints[Math.min(s.tier, wpTints.length - 1)];
+            if (s.owned) this.setStage(item, s.tier);
           }
-          this.toggleStageLabel(s.id, s.owned, s.stageName);
           break;
         }
         case 'watch':
-        case 'face':
+        case 'hair':
         case 'clothes': {
           const worn = this.worn.get(s.id);
           if (worn) {
             worn.visible = s.owned;
-            const wornTints = [0xffffff, 0xbfe8ff, 0xffd97a];
-            worn.tint = wornTints[Math.min(s.tier, wornTints.length - 1)];
+            if (s.owned) this.setStage(worn, s.tier);
           }
-          break; // носимые не подписываются — и так на персонаже
+          break;
         }
       }
     }
   }
 
-  /** Показать/скрыть подпись стадии (destroy при скрытии — как раньше для car). */
-  private toggleStageLabel(key: string, show: boolean, text: string): void {
-    if (show) {
-      this.ensureStageLabel(key, text);
-    } else {
-      this.stageLabels.get(key)?.destroy();
-      this.stageLabels.delete(key);
-    }
-  }
-
-  /** Ленивое создание подписи стадии. */
-  private ensureStageLabel(key: string, text: string): void {
-    let label = this.stageLabels.get(key);
-    if (!label) {
-      label = new Text({
-        text: '',
-        style: new TextStyle({
-          fontFamily: 'Arial, sans-serif',
-          fontSize: 15,
-          fontWeight: '700',
-          fill: 0xd7dde6,
-          stroke: { color: 0x0b0e12, width: 3 },
-        }),
-      });
-      label.anchor.set(0.5);
-      this.app.stage.addChild(label);
-      this.stageLabels.set(key, label);
-    }
-    if (label.text !== text) label.text = text;
-    this.layout();
-  }
   // ----------------------------------------------------------------- тапы
 
-  /** Сквош-эффект персонажа при клике. */
+  /** Сквош-эффект персонажа при клике (относительно его базового масштаба). */
   private punchCharacter(): void {
     if (!this.character) return;
-    this.character.scale.set(1.16);
+    this.character.scale.set(this.charBaseScale * 1.16);
   }
 
   /** Всплывающий текст «+N$» в мировых координатах холста. */
@@ -493,18 +728,13 @@ export class GameView {
   // ------------------------------------------------------------- кадр
 
   private update(dt: number): void {
-    this.time += dt;
-
-    // Плавное возвращение масштаба после тапа.
+    // Плавное возвращение масштаба после тапа (к базовому, а не к 1).
+    // Покачивание/idle ВРЕМЕННО снято (владелец 2026-09-30): позиция и наклон
+    // группы игрока заморожены — её двигает только раскладка по ширине окна.
     if (this.character) {
       const s = this.character.scale.x;
-      const next = s + (1 - s) * Math.min(1, dt * 9);
+      const next = s + (this.charBaseScale - s) * Math.min(1, dt * 9);
       this.character.scale.set(next);
-
-      // Idle-анимация: лёгкое покачивание.
-      this.character.y = this.charBaseY + Math.sin(this.time * 2.2) * 7;
-      this.character.rotation = Math.sin(this.time * 1.1) * 0.02;
-      this.syncWornPositions();
     }
 
     // Обновление всплывающих текстов.
@@ -526,6 +756,9 @@ export class GameView {
   }
 
   destroy(): void {
+    this.offAssets?.();
+    this.offAssets = null;
+    // Текстуры принадлежат AssetRegistry — их освобождает registry.destroy().
     this.app.destroy(true, { children: true, texture: true });
   }
 }
