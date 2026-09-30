@@ -10,6 +10,7 @@
   --text-dim: #9aa5b1;
   --radius: 14px;
   --tabbar-h: 60px; /* высота нижней панели вкладок */
+  --menu-w: min(100%, 420px); /* ЕДИНАЯ ширина плашек меню: верхний HUD = нижняя панель = выноски */
 }
 
 * {
@@ -61,44 +62,60 @@ html, body, #app {
 
 /* ================= Кольцо прогресса мира (слева сверху) ================= */
 
-/* Кнопка-круг слева от HUD-блока. Клик-заглушка — как и у чипа, сработает,
-   когда владелец придумает функционал окна. */
+/*
+ * Круглая кнопка-шкала: тёмная «таблетка» в стиле плашек HUD, дорожка на весь
+ * круг и градиентная дуга прогресса поверх неё; процент — по центру.
+ * ПРИКРЕПЛЕНА К ЛЕВОМУ КРАЮ БЛОКА ПЛАШЕК (right: 100% + 10px) — при ресайзе
+ * окна она едет вместе с меню и не расходится с ним к краю экрана.
+ * Клик — галерея эпох (та же функция, что раньше была у чипа эпохи в HUD).
+ */
 .world-ring {
   position: absolute;
-  top: calc(14px + env(safe-area-inset-top));
-  left: calc(10px + env(safe-area-inset-left));
+  top: calc(8px + env(safe-area-inset-top));
+  right: calc(100% + 10px);
   width: 72px;
   height: 72px;
   padding: 0;
-  border: none;
-  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 34%, rgba(46, 204, 113, 0.18), rgba(16, 20, 24, 0.86) 70%);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
   cursor: pointer;
   z-index: 12;
+  transition: transform 0.14s ease, box-shadow 0.2s ease;
+}
+
+.world-ring:active {
+  transform: scale(0.94);
 }
 
 .world-ring-svg {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  inset: 6px;
+  width: auto;
+  height: auto;
   /* Старт дуги сверху, как в мокапе владельца. */
   transform: rotate(-90deg);
 }
 
-.world-ring-bg {
+/* Дорожка на весь круг: видно, сколько пути ещё осталось. */
+.world-ring-track {
   fill: none;
-  stroke: var(--bg-panel);
-  stroke-width: 5.5;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 6.5;
 }
 
 .world-ring-fg {
   fill: none;
-  stroke: var(--danger);
-  stroke-width: 5.5;
+  /* Градиент задаётся в SVG (UIManager) один раз. */
+  stroke: url(#world-ring-gradient);
+  stroke-width: 6.5;
   stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(163, 228, 53, 0.5));
   /* Обводка рисуется по длине окружности; offset = остаток.
      Точная длина (dasharray/dashoffset) подставляется из TS inline-стилем. */
-  transition: stroke-dashoffset 0.25s ease-out;
+  transition: stroke-dashoffset 0.35s cubic-bezier(0.25, 0.8, 0.35, 1);
 }
 
 .world-ring-pct {
@@ -107,29 +124,48 @@ html, body, #app {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14.5px;
+  font-size: 15.5px;
   font-weight: 800;
-  color: var(--danger);
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  letter-spacing: -0.3px;
+  color: #eaf7ef;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.75);
   pointer-events: none;
+}
+
+/* Смена периода мира — кольцо вспыхивает (аналог прежней вспышки чипа). */
+.world-ring.evolved {
+  animation: ring-glow 1.2s ease-out 3;
+}
+
+@keyframes ring-glow {
+  0%, 100% {
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+  40% {
+    box-shadow: 0 0 22px 4px rgba(46, 204, 113, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
 }
 
 /* ================= Кнопка настроек (справа сверху) ================= */
 
+/* Статичная кнопка-плашка (после дизайна интерфейса сюда лягут графика/звук).
+   ПРИКРЕПЛЕНА К ПРАВОМУ КРАЮ БЛОКА ПЛАШЕК (left: 100% + 10px) — при ресайзе
+   окна едет вместе с меню; размер фиксирован, на узком портрете чуть свисает
+   за край экрана (см. медиа-блок ниже). */
 .settings-btn {
   position: absolute;
   top: calc(8px + env(safe-area-inset-top));
-  right: calc(10px + env(safe-area-inset-right));
-  width: 44px;
-  height: 44px;
+  left: calc(100% + 10px);
+  width: 46px;
+  height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 21px;
+  font-size: 22px;
   color: var(--text-dim);
   background: var(--bg-panel);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: 14px;
   backdrop-filter: blur(8px);
   cursor: pointer;
   z-index: 12;
@@ -142,21 +178,31 @@ html, body, #app {
 /* ================= HUD ================= */
 
 /*
- * Единый центральный блок 2×2 (компоновка как у нижнего меню: сжат к центру,
- * не растягивается). Ячейки:
- *   [пассив /сек] [$ всего]  — верхний ряд
- *   [за клик    ] [подписчики + бар] — нижний ряд
+ * ВЕРХНЯЯ ПАНЕЛЬ как ОДНО ЦЕЛОЕ: блок плашек по центру (+ кольцо и настройки,
+ * прикреплённые к его краям). Ширина и центрирование — те же, что у нижнего
+ * меню (--menu-w, left:50% + translateX(-50%)), поэтому верхние и нижние
+ * плашки совпадают по краям и никуда не уезжают при изменении ширины окна.
+ * Боковых отступов у сетки нет: крайние плашки вровень с нижней панелью.
  */
-.hud-top {
+.hud-bar {
   position: absolute;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: min(100%, 420px);
+  width: var(--menu-w);
+  pointer-events: none; /* плашки — не должны есть тапы по холсту */
+}
+
+/*
+ * Сетка плашек БЕЗ ПОДПИСЕЙ (ТЗ владельца 2026-09-30) — компактные ячейки:
+ *   [баланс] [пассив] / [новая валюта «soon»] [актив] / [подписчики + бар]
+ * Роль подписи: цвет значения (stat-<kind>) и title ячейки.
+ */
+.hud-top {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
+  padding: calc(8px + env(safe-area-inset-top)) 0 0;
   pointer-events: none; /* ячейки денег не должны есть тапы по холсту */
 }
 
@@ -164,30 +210,44 @@ html, body, #app {
    (справа). Виджеты тоже мельчают. Порог 584px = начало наезда HUD 420px
    на кольцо 72px при чистом центрировании. */
 @media (max-width: 583px) {
-  .world-ring {
-    top: calc(24px + env(safe-area-inset-top));
-    width: 52px;
-    height: 52px;
-  }
-
-  .world-ring-pct {
-    font-size: 11px;
-  }
-
-  .settings-btn {
-    width: 40px;
-    height: 40px;
-    font-size: 18px;
-  }
-
-  .hud-top {
+  /* Блок сужается между виджетами — кольцо и настройки висят по его краям,
+     значит автоматически оказываются у краёв экрана (перекрытий нет). */
+  .hud-bar {
     /* Центр доступной полосы [68 .. w-56]: сдвиг +6px, ширина 100%-124px. */
     left: calc(50% + 6px);
     width: min(calc(100% - 124px), 420px);
   }
+
+  .world-ring {
+    width: 52px;
+    height: 52px;
+  }
+
+  .world-ring-svg {
+    inset: 4px;
+  }
+
+  .world-ring-pct {
+    font-size: 11.5px;
+  }
+
+  .cell-value {
+    font-size: 15.5px;
+  }
 }
 
-/* Ячейка-статистика: подпись сверху, значение снизу. */
+/* Мобильное (портретное) соотношение сторон на узком экране: кнопка настроек
+   СТАТИЧНА и остаётся полноразмерной — она отодвигается на 6px дальше от края
+   блока, поэтому совсем немного выходит за край экрана (владелец: «реально
+   чуть-чуть»). На широких экранах места хватает, кнопка целиком внутри. */
+@media (max-aspect-ratio: 1/1) and (max-width: 583px) {
+  .settings-btn {
+    left: calc(100% + 16px);
+  }
+}
+
+/* Ячейка-показатель: только значение (подписей у верхних плашек нет),
+   поэтому плашки компактные — смысл даёт цвет значения. */
 .hud-cell {
   background: var(--bg-panel);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -201,15 +261,6 @@ html, body, #app {
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
-.cell-caption {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
 .cell-value {
   font-size: 17px;
   font-weight: 800;
@@ -218,15 +269,27 @@ html, body, #app {
   text-overflow: ellipsis;
 }
 
-/* Цветовая маркировка потоков: пассив — зелёный, тап — жёлтый. */
-.hud-cell:nth-child(1) .cell-value { color: var(--accent); }
-.hud-cell:nth-child(3) .cell-value { color: #f4b942; }
+/* Цветовая маркировка показателей: пассив — зелёный, тап и новая валюта — золотые. */
+.stat-balance .cell-value { color: var(--text); }
+.stat-passive .cell-value { color: var(--accent); }
+.stat-active .cell-value { color: #f4b942; }
 
-/* Ячейка подписчиков — кнопка (клик = забрать награду). */
+/* Плашка новой валюты (ещё не введена в игру): приглушённая заглушка «soon». */
+.stat-gold .cell-value {
+  color: rgba(244, 185, 66, 0.55);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+
+/* Ячейка подписчиков — кнопка (клик = забрать награду), на всю ширину блока. */
 button.sub-cell {
+  grid-column: 1 / -1;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: var(--text);
   font-family: inherit;
+  text-align: left;
   cursor: default;
   transition: box-shadow 0.2s;
 }
@@ -299,67 +362,9 @@ button.sub-cell {
   background: linear-gradient(90deg, #f4b942, #fff3c4);
 }
 
-/* ================= ЧИП ЭПОХИ МИРА ================= */
+/* ================= ПОПАП-ГАЛЕРЕЯ ЭПОХ ================= */
 
-/*
- * Пятая ячейка HUD — вне сетки 2×2: узкая полоска ПОД блоком, на всю ширину
- * блока. Клик — попап-галерея стадий. Без бара на самом чипе (он в попапе),
- * чтобы не дублировать подписчикам.
- */
-.era-chip {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  background: var(--bg-panel);
-  backdrop-filter: blur(8px);
-  color: var(--text);
-  font-family: inherit;
-  padding: 6px 12px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.era-chip:active {
-  transform: translateY(1px);
-}
-
-.era-icon {
-  font-size: 15px;
-  line-height: 1;
-  flex: none;
-}
-
-.era-name {
-  font-size: 13.5px;
-  font-weight: 800;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.era-next {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-dim);
-  white-space: nowrap;
-  flex: none;
-}
-
-.era-chip.evolved {
-  animation: era-glow 1.2s ease-out 3;
-}
-
-@keyframes era-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
-  40% { box-shadow: 0 0 18px 3px rgba(46, 204, 113, 0.5); }
-}
-
-/* ---------- Попап-галерея стадий ---------- */
+/* Открывается кликом по кольцу прогресса (чипа эпохи в HUD больше нет). */
 
 /* Тот же паттерн «скрыта = не ловит тапы», что у модалки офлайна. */
 .era-pop {
@@ -368,7 +373,7 @@ button.sub-cell {
   bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px);
   transform: translateX(-50%) scale(0.96);
   transform-origin: bottom center;
-  width: min(100%, 420px);
+  width: var(--menu-w);
   max-height: min(58vh, calc(100vh - var(--tabbar-h) - 150px));
   display: flex;
   flex-direction: column;
@@ -500,7 +505,7 @@ button.sub-cell {
   left: 50%;
   bottom: 0;
   transform: translateX(-50%);
-  width: min(100%, 420px);
+  width: var(--menu-w);
   display: flex;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-bottom: none;
@@ -554,7 +559,7 @@ button.sub-cell {
   bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px); /* зазор над меню (с учётом safe-area реальной высоты панели) */
   transform: translateX(-50%) scale(0.96);
   transform-origin: bottom center;
-  width: min(100%, 420px);
+  width: var(--menu-w);
   max-height: min(62vh, calc(100vh - var(--tabbar-h) - 140px));
   display: flex;
   flex-direction: column;
