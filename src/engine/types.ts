@@ -3,6 +3,14 @@ import type Decimal from 'break_infinity.js';
 /** Группа объектов = вкладка снизу. Новая вкладка = ключ сюда + объекты в data/objects.ts. */
 export type ObjectGroup = 'property' | 'outfit' | 'workplace' | 'skills';
 
+/**
+ * Режим покупки в магазине (радио сверху выноски, выбор пользователя):
+ *  - 'one'  — строго один уровень за действие;
+ *  - 'tier' — максимум доступного на текущие деньги, но НЕ дальше конца
+ *             текущего грейда (tiers.levelsPerTier): прогресс-бар обнуляется.
+ */
+export type BuyMode = 'one' | 'tier';
+
 /** id всех прокачиваемых объектов игры. */
 export type ObjectId =
   | 'house' | 'car' | 'bg'

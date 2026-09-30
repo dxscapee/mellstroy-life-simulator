@@ -607,6 +607,38 @@ button.sub-cell {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ================= РЕЖИМ ПОКУПКИ (радио над карточками) ================= */
+
+.sheet-modes {
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 10px;
+}
+
+.mode-btn {
+  flex: 1 1 0;
+  padding: 8px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+/* Выбранный режим (аналог установленного RadioButton в Qt). */
+.mode-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #062b14;
+}
+
 /* ================= КАРТОЧКА АПГРЕЙДА ================= */
 
 .upgrade-card {
@@ -769,6 +801,11 @@ button.sub-cell {
   cursor: pointer;
   text-align: center;
   transition: background 0.12s, transform 0.12s;
+  /* Зажатие кнопки покупки: жест не уезжает в скролл списка и не выделяет текст. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .upgrade-buy:disabled {

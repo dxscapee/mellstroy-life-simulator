@@ -7,7 +7,7 @@ import { GameLoop } from './GameLoop';
 import { OfflineProgress } from './OfflineProgress';
 import { SaveManager } from './SaveManager';
 import { WorldWatch } from './WorldProgress';
-import type { ObjectDef } from './types';
+import type { BuyMode, ObjectDef } from './types';
 
 /**
  * Фасад ядра: связывает состояние, цикл, сейвы и офлайн-доход.
@@ -136,12 +136,18 @@ export class Game {
     return reward;
   }
 
-  /** Покупка уровня объекта. Возвращает деф, если покупка состоялась. */
-  buyObject(id: string): ObjectDef | null {
+  /**
+   * Покупка уровней объекта. mode — режим магазина ('one' — один уровень,
+   * 'tier' — до конца текущего грейда на доступные деньги, см. BuyMode).
+   * События эмитятся ОДИН раз на всю пачку (иначе зажатая кнопка спамит шину):
+   * сцена получает одно 'object:levelup', карточки/HUD обновятся на ближайшем тике.
+   * Возвращает деф, если покупка состоялась.
+   */
+  buyObject(id: string, mode: BuyMode = 'one'): ObjectDef | null {
     const def = objectById.get(id as ObjectDef['id']);
     if (!def) return null;
 
-    if (!this.state.buyUpgrade(def)) return null;
+    if (this.state.buyUpgradeBulk(def, mode) <= 0) return null;
 
     events.emit('object:levelup', def);
     events.emit('money:changed', undefined);
