@@ -1,3 +1,4 @@
+import { WORLD_ERA_NAMES } from '@data/worldStages';
 import { events } from '@engine/eventBus';
 import { formatCount, formatMoney, formatIncomePerSecond } from '@engine/format';
 import { worldProgressFrac } from '@engine/WorldProgress';
@@ -23,12 +24,12 @@ const WORLD_RING_GRADIENT_STOPS: ReadonlyArray<readonly [string, string]> = [
  * Композитор HTML-слоя: создаёт HUD, выноску и модалку, подписывает их
  * на события движка. Логики не содержит — только связывание и рендер.
  *
- * Верхняя панель .hud-bar — центрируется как ОДНО ЦЕЛОЕ и по ширине равна
- * нижнему меню (--menu-w, left:50% + translateX(-50%)). Внутри неё блок плашек
- * .hud-top (без подписей — только значения) и ПРИКРЕПЛЁННЫЕ к его краям кольцо
- * прогресса мира (слева) и кнопка настроек (справа): они позиционируются от
- * краёв БЛОКА (right/left: calc(100% + 10px)), а не от краёв окна, поэтому при
- * ресайзе не разъезжаются от меню.
+ * Верхняя панель .hud-bar — блок плашек по ширине нижнего меню, СДВИНУТЫЙ
+ * вправо от центра (--hud-shift): слева остаётся полоса под кольцо прогресса
+ * мира, которое ПРИКРЕПЛЕНО К ЛЕВОМУ КРАЮ БЛОКА (right: calc(100% + зазор)),
+ * а не к краю окна, поэтому при ресайзе не расходится с меню. Размер кольца
+ * считает CSS (--ring-size) — от свободного места слева.
+ * Под кольцом — название локации (эпоха мира).
  * Плашки (порядок DOM row-major, без подписей):
  *   [баланс][пассив] / [новая валюта «soon»][актив] / [подписчики + бар]
  * Смысл ячейки — в цвете и суффиксе значения, полное имя — в title.
@@ -50,10 +51,10 @@ export class UIManager {
   private worldRing: HTMLButtonElement;
   private worldRingFg: SVGCircleElement;
   private worldRingPct: HTMLElement;
+  /** Название локации прогресса (эпоха мира) под кольцом. */
+  private worldLabel: HTMLElement;
   private lastWorldPct = -1;
   private readonly worldRingC: number;
-  /** Кнопка настроек (пока заглушка — сюда лягут графика/звук). */
-  private settingsBtn: HTMLButtonElement;
   private lastBalanceRendered: string | null = null;
   private lastPassiveRendered: string | null = null;
   private lastActiveRendered: string | null = null;
@@ -180,21 +181,16 @@ export class UIManager {
     this.worldRingPct.className = 'world-ring-pct';
     this.worldRingPct.textContent = '0%';
 
-    this.worldRing.append(ringSvg, this.worldRingPct);
+    // Название локации — под кольцом, внутри самой кнопки: клик по подписи
+    // открывает ту же галерею эпох (а не уходит тапом в сцену). Ширину подписи
+    // держит CSS (100% кольца) — за компоновку верхней панели не выходит.
+    this.worldLabel = document.createElement('span');
+    this.worldLabel.className = 'world-label';
+    this.worldLabel.textContent = WORLD_ERA_NAMES[0] ?? '';
+
+    this.worldRing.append(ringSvg, this.worldRingPct, this.worldLabel);
     this.worldRing.addEventListener('click', () => this.eraPopup.toggle());
     bar.appendChild(this.worldRing); // прикреплено к ЛЕВОМУ краю блока плашек
-
-    // ---------- кнопка настроек (справа сверху, заглушка под будущий функционал) ----------
-    this.settingsBtn = document.createElement('button');
-    this.settingsBtn.className = 'settings-btn js-interactive';
-    this.settingsBtn.type = 'button';
-    this.settingsBtn.title = 'Настройки';
-    this.settingsBtn.setAttribute('aria-label', 'Настройки');
-    this.settingsBtn.textContent = '⚙';
-    this.settingsBtn.addEventListener('click', () => {
-      // Пока пусто: здесь откроется панель настроек (графика/звук и т.д.).
-    });
-    bar.appendChild(this.settingsBtn); // прикреплено к ПРАВОМУ краю блока плашек
     uiRoot.appendChild(bar);
 
     this.sheet = new ObjectSheet(uiRoot, game);
@@ -203,6 +199,7 @@ export class UIManager {
     this.renderHud();
     this.renderSubscribers(true);
     this.renderWorldRing();
+    this.renderWorldLabel();
 
     // ---------- подписки ----------
     this.unsubscribers.push(
@@ -211,11 +208,13 @@ export class UIManager {
       events.on('object:levelup', () => this.forceHud()),
       events.on('subscribers:changed', () => this.renderSubscribers()),
       events.on('subscribers:ready', () => this.renderSubscribers()),
-      // Смена периода мира: кольцо вспыхивает (попап обновит себя сам).
+      // Смена периода мира: кольцо вспыхивает (попап обновит себя сам),
+      // подпись локации обновляется (меняется только на смене ЭПОХИ).
       events.on('world:changed', () => {
         this.worldRing.classList.remove('evolved');
         void this.worldRing.offsetWidth; // рестарт CSS-анимации
         this.worldRing.classList.add('evolved');
+        this.renderWorldLabel();
       }),
       // Полный сброс (дебаг): HUD и подписчики могут не измениться по ключам — рендерим принудительно.
       events.on('game:reset', () => {
@@ -223,6 +222,7 @@ export class UIManager {
         this.lastWorldPct = -1;
         this.forceHud();
         this.renderWorldRing();
+        this.renderWorldLabel();
       }),
     );
   }
@@ -329,6 +329,17 @@ export class UIManager {
       this.worldRingC * (1 - pct / 100),
     );
     this.worldRingPct.textContent = `${pct}%`;
+  }
+
+  /**
+   * Название локации под кольцом (эпоха мира). Меняется только на смене эпохи,
+   * поэтому зовётся не в тике, а по событиям (world:changed / game:reset).
+   */
+  private renderWorldLabel(): void {
+    const era = this.game.worldWatch.stage.era;
+    const name = WORLD_ERA_NAMES[Math.min(era, WORLD_ERA_NAMES.length - 1)] ?? '';
+    if (name === this.worldLabel.textContent) return;
+    this.worldLabel.textContent = name;
   }
 
   destroy(): void {
