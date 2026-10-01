@@ -228,6 +228,12 @@ export class GameView {
   private lastWorldEra = -1;
   /** Ключ ассета, который сейчас на фоне (null — заглушка). */
   private appliedWorldKey: string | null = null;
+  /**
+   * Принудительный показ подписей ВСЕХ объектов (номер · имя · размер) —
+   * дебаг-фича из панели (кнопка «Подписи объектов»). По умолчанию ВЫКЛ:
+   * подписи живут только на заглушках, т.е. там, где текстуры ещё нет.
+   */
+  private labelsForced = false;
 
   /** Базовый масштаб персонажа — точка возврата сквиш-эффекта при тапе. */
   private charBaseScale = 1;
@@ -340,6 +346,8 @@ export class GameView {
     });
     mark.anchor.set(0.5, 1);
     mark.position.set(0, Math.round(-spec.h / 2) - 6 - (spec.lift ?? 0));
+    // Видимость — строго по флагу показа подписей (по умолчанию ВЫКЛ).
+    mark.visible = this.labelsForced;
     c.addChild(mark);
     this.visuals.set(c, { spec, gfx: g, label: mark, sprite, stage: -1, appliedKey: null });
 
@@ -503,6 +511,8 @@ export class GameView {
     if (!this.worldLabel) {
       this.worldLabel = new Text({ text, style: this.markerStyle() });
       this.worldLabel.anchor.set(0, 1);
+      // Видимость — строго по флагу показа подписей (по умолчанию ВЫКЛ).
+      this.worldLabel.visible = this.labelsForced;
       this.app.stage.addChild(this.worldLabel);
     } else if (this.worldLabel.text !== text) {
       this.worldLabel.text = text;
@@ -561,7 +571,6 @@ export class GameView {
         this.appliedWorldKey = null;
       }
       this.world.setTexture(null);
-      this.setWorldLabelVisible(true);
       return;
     }
 
@@ -571,15 +580,22 @@ export class GameView {
     this.world.setTexture(texture);
     if (this.appliedWorldKey) this.assets.release(this.appliedWorldKey);
     this.appliedWorldKey = key;
-    this.setWorldLabelVisible(false);
-  }
-
-  /** Метка фона видна только на заглушке (как и подписи объектов). */
-  private setWorldLabelVisible(visible: boolean): void {
-    if (this.worldLabel) this.worldLabel.visible = visible;
   }
 
   // ---------------------------------------------------------------- текстуры
+
+  /**
+   * Показать/скрыть ПОДПИСИ ОБЪЕКТОВ (номер · имя · размер) — ДЕБАГ-ФИЧА
+   * (кнопка в дебаг-панели; из консоли — scene.setObjectLabels(true)).
+   * ВЫКЛ (по умолчанию): подписи скрыты У ВСЕХ — и на заглушках, и поверх
+   * текстур. ВКЛ: подписи ВСЕХ объектов + метка фона.
+   * Рамки-заглушки (gfx) не трогаем: под текстурой они не нужны.
+   */
+  setObjectLabels(visible: boolean): void {
+    this.labelsForced = visible;
+    for (const rec of this.visuals.values()) this.syncLabelVisibility(rec);
+    if (this.worldLabel) this.worldLabel.visible = visible;
+  }
 
   /** Пере-синхронизация всех видимых узлов и фона после догрузки ассетов. */
   refreshTextures(): void {
@@ -623,16 +639,24 @@ export class GameView {
     rec.sprite.height = rec.spec.h;
     rec.sprite.visible = true;
     rec.gfx.visible = false;
-    rec.label.visible = false;
     rec.appliedKey = key;
+    this.syncLabelVisibility(rec);
   }
 
   /** Вернуть узел к прямоугольнику-заглушке (ассет исчез из манифеста). */
   private showPlaceholder(rec: RectVisual): void {
     rec.sprite.visible = false;
     rec.gfx.visible = true;
-    rec.label.visible = true;
     rec.appliedKey = null;
+    this.syncLabelVisibility(rec);
+  }
+
+  /**
+   * Единое правило видимости подписи узла: подписи видны ТОЛЬКО при
+   * включённом показе из дебаг-панели (labelsForced, по умолчанию ВЫКЛ).
+   */
+  private syncLabelVisibility(rec: RectVisual): void {
+    rec.label.visible = this.labelsForced;
   }
 
   // ------------------------------------------------------------ тиры сцены

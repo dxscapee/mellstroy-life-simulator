@@ -1,6 +1,7 @@
 import '@debug/debugPanel.css';
 import Decimal from 'break_infinity.js';
 import type { Game } from '@engine/Game';
+import type { GameView } from '@view/GameView';
 import { gameConfig } from '@data/gameConfig';
 import { objectDefs } from '@data/objects';
 import { formatNumber } from '@engine/format';
@@ -24,6 +25,7 @@ import { formatNumber } from '@engine/format';
 const PANEL_ID = 'debug-panel';
 
 let panelEl: HTMLElement | null = null;
+let cornerDotEl: HTMLButtonElement | null = null;
 let speedButtons: HTMLButtonElement[] = [];
 let logListEl: HTMLElement | null = null;
 let undoBtn: HTMLButtonElement | null = null;
@@ -39,7 +41,12 @@ const undoStack: DebugAction[] = [];
 /** Глубина отката: максимум 10 последних действий (LIFO, по одному за нажатие). */
 const UNDO_LIMIT = 10;
 
-export function setupDebugPanel(game: Game): void {
+/**
+ * @param game  ядро (деньги/уровни/скорость) — как и раньше;
+ * @param scene слой Pixi — нужен только кнопке подписей объектов
+ *              (setObjectLabels; по умолчанию подписи ВЫКЛ).
+ */
+export function setupDebugPanel(game: Game, scene: GameView): void {
   if (document.getElementById(PANEL_ID)) return;
 
   panelEl = document.createElement('div');
@@ -155,6 +162,20 @@ export function setupDebugPanel(game: Game): void {
   game.setTimeScale(1);
   refreshSpeedHighlight(1);
 
+  // ============ Подписи объектов: «номер · имя · размер» ============
+  // ТЗ владельца 2026-10-02 (корректура): ВЫКЛ по умолчанию — подписи НЕ видны
+  // нигде (даже на заглушках). ВКЛ — подписи ВСЕХ объектов + метка фона
+  // (сверять габариты рисунка с боксом сцены).
+  let labelsOn = false;
+  const labelsBtn = mkBtn('Подписи объектов: ВЫКЛ', () => {
+    labelsOn = !labelsOn;
+    scene.setObjectLabels(labelsOn);
+    labelsBtn.textContent = `Подписи объектов: ${labelsOn ? 'ВКЛ' : 'ВЫКЛ'}`;
+    labelsBtn.classList.toggle('active-forced', labelsOn);
+    log(`Подписи объектов: ${labelsOn ? 'ВКЛ — у всех объектов' : 'ВЫКЛ — подписи скрыты'}`);
+  });
+  labelsBtn.title = 'Показать/скрыть подписи «номер · имя · размер» у всех объектов сцены';
+
   // ============ Сброс (полная ширина) ============
   let resetArmed = false;
   let resetDisarmTimer = 0;
@@ -189,11 +210,11 @@ export function setupDebugPanel(game: Game): void {
   logListEl.textContent = '';
 
   // --- скрытая кнопка-точка в углу ---
-  const cornerDot = document.createElement('button');
-  cornerDot.className = 'debug-corner-dot';
-  cornerDot.title = 'Debug panel (~)';
-  cornerDot.addEventListener('click', toggle);
-  document.body.appendChild(cornerDot);
+  cornerDotEl = document.createElement('button');
+  cornerDotEl.className = 'debug-corner-dot';
+  cornerDotEl.title = 'Debug panel (~)';
+  cornerDotEl.addEventListener('click', toggle);
+  document.body.appendChild(cornerDotEl);
 
   panelEl.append(
     title,
@@ -204,6 +225,7 @@ export function setupDebugPanel(game: Game): void {
     undoBtn,
     lvlAllBtn,
     speedRow,
+    labelsBtn,
     resetBtn,
     logListEl,
   );
@@ -326,8 +348,14 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
+/**
+ * Открыть/закрыть панель. Точка-триггер при этом ПЕРЕЕЗЖАЕТ к правому
+ * верхнему углу панели (класс .panel-open): панель выше её по z-index и
+ * иначе перекрывала бы точку — закрыть панель с неё было бы нельзя.
+ */
 function toggle(): void {
-  panelEl?.classList.toggle('visible');
+  const open = panelEl?.classList.toggle('visible') ?? false;
+  cornerDotEl?.classList.toggle('panel-open', open);
 }
 
 function refreshSpeedHighlight(active: number): void {
