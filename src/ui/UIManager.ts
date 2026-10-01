@@ -6,6 +6,7 @@ import type { Game } from '@engine/Game';
 import { Modal } from './OfflineModal';
 import { ObjectSheet } from './ObjectSheet';
 import { EraPopup } from './EraPopup';
+import type { EraPreviewProvider } from './EraPopup';
 
 /** Геометрия кольца прогресса мира (viewBox 60×60). */
 const WORLD_RING_R = 26;
@@ -66,11 +67,16 @@ export class UIManager {
   constructor(
     uiRoot: HTMLElement,
     private readonly game: Game,
+    /**
+     * Провайдер превью эпох (URL фона из манифеста) — даёт main из AssetRegistry,
+     * поэтому ui остаётся в стороне от view (только данные, без импорта слоя).
+     */
+    eraPreview?: EraPreviewProvider,
   ) {
     this.worldRingC = 2 * Math.PI * WORLD_RING_R;
     // Попап-галерея эпох: открывается кольцом прогресса (см. ниже). Раньше
     // его открывал и чип эпохи в HUD — чипа больше нет, роль осталась кольцу.
-    this.eraPopup = new EraPopup(uiRoot, game.worldWatch);
+    this.eraPopup = new EraPopup(uiRoot, game.worldWatch, eraPreview);
 
     // ---------- верхняя панель: блок плашек + кольцо и настройки по его краям ----------
     // .hud-bar центрируется как одно целое (та же ширина, что у нижнего меню).

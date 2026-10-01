@@ -361,19 +361,21 @@ button.sub-cell {
   background: linear-gradient(90deg, #f4b942, #fff3c4);
 }
 
-/* ================= ПОПАП-ГАЛЕРЕЯ ЭПОХ ================= */
+/* ================= ПОПАП-ГАЛЕРЕЯ ЭПОХ (карусель) ================= */
 
-/* Открывается кликом по кольцу прогресса (чипа эпохи в HUD больше нет). */
+/* Открывается кликом по кольцу прогресса (чипа эпохи в HUD больше нет).
+   ОКНО ПО ЦЕНТРУ ЭКРАНА (ТЗ владельца 2026-10-02: раньше висело над нижней
+   панелью). Одна страница = одна эпоха: превью + общая нижняя строка;
+   листается стрелками по краям кадра и точками-индикатором снизу. */
 
 /* Тот же паттерн «скрыта = не ловит тапы», что у модалки офлайна. */
 .era-pop {
   position: absolute;
+  top: 50%;
   left: 50%;
-  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px);
-  transform: translateX(-50%) scale(0.96);
-  transform-origin: bottom center;
+  transform: translate(-50%, -50%) scale(0.96);
   width: var(--menu-w);
-  max-height: min(58vh, calc(100vh - var(--tabbar-h) - 150px));
+  max-height: calc(100vh - var(--tabbar-h) - 40px);
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
@@ -389,7 +391,7 @@ button.sub-cell {
 }
 
 .era-pop.open {
-  transform: translateX(-50%) scale(1);
+  transform: translate(-50%, -50%) scale(1);
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -407,36 +409,139 @@ button.sub-cell {
   font-weight: 700;
 }
 
-.era-pop-list {
-  overflow-y: auto;
-  padding: 2px 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  -webkit-overflow-scrolling: touch;
+/* ---------- кадр карусели: стрелки / лента страниц ---------- */
+
+.era-viewport {
+  position: relative;
+  overflow: hidden;
+  margin: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.32);
 }
 
-/* Строка эпохи в галерее: иконка / имя + фазы / прогресс или порог. */
-.era-row {
+/* Ширина ленты (N×кадр) и доля страницы задаются из TS: N = число эпох,
+   дублировать его в CSS не нужно. */
+.era-track {
+  display: flex;
+  transition: transform 0.28s cubic-bezier(0.25, 0.8, 0.35, 1);
+}
+
+.era-page {
+  min-width: 0;
+}
+
+/* Превью эпохи: фон эпохи ЦЕЛИКОМ (contain — арт не обрезаем, поля по бокам). */
+.era-media {
+  display: block;
+  width: 100%;
+  height: clamp(170px, 30vh, 300px);
+  object-fit: contain;
+}
+
+/* Будущая эпоха: содержимое уровня не показываем — только «?». */
+.era-media-unknown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: clamp(170px, 30vh, 300px);
+  font-size: clamp(64px, 15vh, 108px);
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.26);
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.65);
+}
+
+/* Ассета фона ещё нет — страница не пустует: иконка эпохи + подпись. */
+.era-media-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: clamp(170px, 30vh, 300px);
+  color: var(--text-dim);
+}
+
+.era-media-empty-icon {
+  font-size: 42px;
+  opacity: 0.7;
+}
+
+.era-media-empty-text {
+  font-size: 12px;
+}
+
+/* Стрелки листания — по краям кадра, поверх превью. */
+.era-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 3px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+  background: rgba(12, 16, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  z-index: 2;
+}
+
+.era-arrow-prev { left: 6px; }
+.era-arrow-next { right: 6px; }
+
+.era-arrow:active { transform: translateY(-50%) scale(0.94); }
+
+.era-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Точки-индикатор: сколько всего страниц и где игрок; клик = прыжок на страницу.
+   Хит-зона 18px, видимый кружок 10px (толщина прозрачной рамки). */
+.era-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 0 0;
+}
+
+.era-dot {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 4px solid transparent;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: padding-box;
+  cursor: pointer;
+}
+
+.era-dot.active {
+  background: var(--accent);
+  background-clip: padding-box;
+  cursor: default;
+}
+
+/* ---------- нижняя строка просматриваемой эпохи ---------- */
+
+.era-strip {
   display: grid;
   grid-template-columns: 34px 1fr auto;
   gap: 10px;
   align-items: center;
-  padding: 9px 10px;
-  border-radius: 12px;
-  background: var(--bg-card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 16px 14px;
 }
 
-.era-row.current {
-  border-color: rgba(46, 204, 113, 0.55);
-}
-
-.era-row.future {
-  opacity: 0.5;
-}
-
-.era-row-icon {
+.era-strip-icon {
   width: 34px;
   height: 34px;
   display: flex;
@@ -447,22 +552,22 @@ button.sub-cell {
   border-radius: 9px;
 }
 
-.era-row-body {
+.era-strip-body {
   display: flex;
   flex-direction: column;
   gap: 3px;
   min-width: 0;
 }
 
-.era-row-name {
-  font-size: 13.5px;
+.era-strip-name {
+  font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.era-row-veg {
+.era-strip-sub {
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -470,15 +575,11 @@ button.sub-cell {
   text-overflow: ellipsis;
 }
 
-.era-row-side {
-  font-size: 11px;
+.era-strip-side {
+  font-size: 12px;
   font-weight: 700;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-.era-row.current .era-row-side {
   color: var(--accent);
+  white-space: nowrap;
 }
 
 .era-bar {
