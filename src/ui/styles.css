@@ -63,8 +63,9 @@ html, body, #app {
 /* ================= Кольцо прогресса мира + локация (слева сверху) ================= */
 
 /*
- * Круглая кнопка-шкала: тёмная «таблетка» в стиле плашек HUD, дорожка на весь
- * круг и градиентная дуга прогресса поверх неё; процент — по центру.
+ * Круглая кнопка-шкала: тёмная «таблетка» из тех же материалов, что плашки HUD
+ * (var(--bg-panel) + рамка 8%), дорожка на весь круг и сплошная зелёная дуга
+ * (акцент) поверх неё; процент — по центру.
  * ПРИКРЕПЛЕНА К ЛЕВОМУ КРАЮ БЛОКА ПЛАШЕК (right: 100% + --ring-gap) — при ресайзе
  * окна она едет вместе с меню и не расходится с ним к краю экрана.
  * Клик — галерея эпох (та же функция, что раньше была у чипа эпохи в HUD).
@@ -89,11 +90,12 @@ html, body, #app {
   width: var(--ring-size);
   height: var(--ring-size);
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* Материалы плашек HUD (.hud-cell): фон var(--bg-panel) + рамка 8% — без
+     зелёного радиального оттенка, внутренней подсветки и «уличной» тени. */
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 34%, rgba(46, 204, 113, 0.18), rgba(16, 20, 24, 0.86) 70%);
+  background: var(--bg-panel);
   backdrop-filter: blur(8px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
   cursor: pointer;
   z-index: 12;
   transition: transform 0.14s ease, box-shadow 0.2s ease;
@@ -123,11 +125,10 @@ html, body, #app {
 
 .world-ring-fg {
   fill: none;
-  /* Градиент задаётся в SVG (UIManager) один раз. */
-  stroke: url(#world-ring-gradient);
+  /* Сплошной акцентный зелёный — как у других элементов интерфейса. */
+  stroke: var(--accent);
   stroke-width: 6.5;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 4px rgba(163, 228, 53, 0.5));
   /* Обводка рисуется по длине окружности; offset = остаток.
      Точная длина (dasharray/dashoffset) подставляется из TS inline-стилем. */
   transition: stroke-dashoffset 0.35s cubic-bezier(0.25, 0.8, 0.35, 1);
@@ -143,7 +144,7 @@ html, body, #app {
   font-size: calc(var(--ring-size) * 0.215);
   font-weight: 800;
   letter-spacing: -0.3px;
-  color: #eaf7ef;
+  color: var(--text);
   text-shadow: 0 1px 5px rgba(0, 0, 0, 0.75);
   pointer-events: none;
 }
@@ -182,10 +183,10 @@ html, body, #app {
 
 @keyframes ring-glow {
   0%, 100% {
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    box-shadow: none;
   }
   40% {
-    box-shadow: 0 0 22px 4px rgba(46, 204, 113, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    box-shadow: 0 0 22px 4px rgba(46, 204, 113, 0.55);
   }
 }
 
@@ -221,7 +222,7 @@ html, body, #app {
 /*
  * Сетка плашек БЕЗ ПОДПИСЕЙ (ТЗ владельца 2026-09-30) — компактные ячейки:
  *   [баланс] [пассив] / [новая валюта «soon»] [актив] / [подписчики + бар]
- * Роль подписи: цвет значения (stat-<kind>) и title ячейки.
+ * Роль показателя: значение (все — одного белого цвета) и title ячейки.
  */
 .hud-top {
   display: grid;
@@ -246,7 +247,7 @@ html, body, #app {
 }
 
 /* Ячейка-показатель: только значение (подписей у верхних плашек нет),
-   поэтому плашки компактные — смысл даёт цвет значения. */
+   поэтому плашки компактные; цвет у всех значений ОДИНАКОВЫЙ — белый. */
 .hud-cell {
   background: var(--bg-panel);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -268,14 +269,17 @@ html, body, #app {
   text-overflow: ellipsis;
 }
 
-/* Цветовая маркировка показателей: пассив — зелёный, тап и новая валюта — золотые. */
-.stat-balance .cell-value { color: var(--text); }
-.stat-passive .cell-value { color: var(--accent); }
-.stat-active .cell-value { color: #f4b942; }
+/* Все значения верхнего меню — ОДНОГО БЕЛОГО цвета (ТЗ владельца 2026-10-02):
+   разноцветную маркировку (зелёный пассив, золотые тап/валюта) убрали,
+   роль показателя даёт title ячейки. */
+.stat-balance .cell-value,
+.stat-passive .cell-value,
+.stat-active .cell-value { color: var(--text); }
 
-/* Плашка новой валюты (ещё не введена в игру): приглушённая заглушка «soon». */
+/* Плашка новой валюты (ещё не введена в игру): заглушка «soon» — тоже белая,
+   отличие только в типографике (мельче, капс, разрядка). */
 .stat-gold .cell-value {
-  color: rgba(244, 185, 66, 0.55);
+  color: var(--text);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 1.6px;
@@ -306,6 +310,8 @@ button.sub-cell {
   justify-content: flex-start; /* влево, рядом с иконкой */
   gap: 4px;
   min-width: 0;
+  /* Та же причина, что у .sub-track: у <button> в Chrome свой UA align-items. */
+  align-self: stretch;
 }
 
 .sub-count {
@@ -324,22 +330,14 @@ button.sub-cell {
   min-width: 0;
 }
 
-.sub-cell.claimable .sub-count {
-  color: #f4b942;
-}
-
 .sub-cell.claimable {
   cursor: pointer;
   animation: sub-pulse 1.1s ease-in-out infinite;
 }
 
 @keyframes sub-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(244, 185, 66, 0.0); }
-  50% { box-shadow: 0 0 14px 2px rgba(244, 185, 66, 0.55); }
-}
-
-.sub-cell.claimable .cell-value {
-  color: #f4b942;
+  0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.0); }
+  50% { box-shadow: 0 0 14px 2px rgba(231, 76, 60, 0.55); }
 }
 
 .sub-track {
@@ -347,18 +345,22 @@ button.sub-cell {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.12);
   overflow: hidden;
+  /* ВАЖНО: у <button> в Chrome UA задаёт align-items: flex-start — пустой
+     трек схлопывался в 0 и полоса не рисовалась; stretch возвращает ширину. */
+  align-self: stretch;
 }
 
 .sub-fill {
   height: 100%;
   width: 0%;
   border-radius: 4px;
-  background: linear-gradient(90deg, #f4b942, #ffe08a);
+  /* Заполняющаяся полоса подписчиков — КРАСНАЯ (ТЗ владельца 2026-10-02). */
+  background: linear-gradient(90deg, var(--danger), #ff8b7d);
   transition: width 0.3s ease-out;
 }
 
 .sub-cell.claimable .sub-fill {
-  background: linear-gradient(90deg, #f4b942, #fff3c4);
+  background: linear-gradient(90deg, #ff5a4e, #ffb0a4);
 }
 
 /* ================= ПОПАП-ГАЛЕРЕЯ ЭПОХ (карусель) ================= */

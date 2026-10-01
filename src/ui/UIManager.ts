@@ -11,16 +11,6 @@ import type { EraPreviewProvider } from './EraPopup';
 /** Геометрия кольца прогресса мира (viewBox 60×60). */
 const WORLD_RING_R = 26;
 
-/** id градиента дуги кольца (на него ссылается CSS: stroke: url(#…)). */
-const WORLD_RING_GRADIENT_ID = 'world-ring-gradient';
-
-/** Цвета градиента дуги: зелёный → салатовый → жёлтый (как «дорога» прогресса). */
-const WORLD_RING_GRADIENT_STOPS: ReadonlyArray<readonly [string, string]> = [
-  ['0%', '#2ecc71'],
-  ['55%', '#a3e435'],
-  ['100%', '#f4b942'],
-];
-
 /**
  * Композитор HTML-слоя: создаёт HUD, выноску и модалку, подписывает их
  * на события движка. Логики не содержит — только связывание и рендер.
@@ -33,7 +23,8 @@ const WORLD_RING_GRADIENT_STOPS: ReadonlyArray<readonly [string, string]> = [
  * Под кольцом — название локации (эпоха мира).
  * Плашки (порядок DOM row-major, без подписей):
  *   [баланс][пассив] / [новая валюта «soon»][актив] / [подписчики + бар]
- * Смысл ячейки — в цвете и суффиксе значения, полное имя — в title.
+ * Смысл ячейки: значение (все — одного белого цвета, ТЗ 2026-10-02),
+ * полное имя — в title.
  */
 export class UIManager {
   readonly sheet: ObjectSheet;
@@ -135,8 +126,8 @@ export class UIManager {
     hud.appendChild(this.subChip);
 
     // ---------- кольцо прогресса мира (слева от HUD) ----------
-    // Круглая кнопка-шкала: тёмная таблетка в стиле плашек HUD, градиентная
-    // дуга прогресса (зелёный → жёлтый) и % внутри. Заполняется от ЖИВОЙ дроби
+    // Круглая кнопка-шкала: тёмная таблетка в стиле плашек HUD, сплошная
+    // зелёная дуга прогресса (акцент) и % внутри. Заполняется от ЖИВОЙ дроби
     // периода worldProgressFrac(totalEarned) — кэш WorldWatch «заморожен»
     // между сменами. Клик — галерея эпох: та же функция, что была у чипа.
     this.worldRing = document.createElement('button');
@@ -150,24 +141,8 @@ export class UIManager {
     ringSvg.setAttribute('viewBox', '0 0 60 60');
     ringSvg.classList.add('world-ring-svg');
 
-    // Градиент дуги задаётся один раз; CSS ссылается на него через
-    // stroke: url(#world-ring-gradient) — перекраски из JS не нужны.
-    const ringDefs = document.createElementNS(NS, 'defs');
-    const ringGrad = document.createElementNS(NS, 'linearGradient');
-    ringGrad.setAttribute('id', WORLD_RING_GRADIENT_ID);
-    ringGrad.setAttribute('x1', '0');
-    ringGrad.setAttribute('y1', '0');
-    ringGrad.setAttribute('x2', '1');
-    ringGrad.setAttribute('y2', '1');
-    for (const [offset, color] of WORLD_RING_GRADIENT_STOPS) {
-      const stop = document.createElementNS(NS, 'stop');
-      stop.setAttribute('offset', offset);
-      stop.setAttribute('stop-color', color);
-      ringGrad.appendChild(stop);
-    }
-    ringDefs.appendChild(ringGrad);
-
     // Дорожка (весь круг) под дугой прогресса — видно, сколько ещё осталось.
+    // Цвет дуги задан в CSS (stroke: var(--accent)) — SVG без defs и градиентов.
     const ringTrack = document.createElementNS(NS, 'circle');
     ringTrack.setAttribute('cx', '30');
     ringTrack.setAttribute('cy', '30');
@@ -181,7 +156,7 @@ export class UIManager {
     this.worldRingFg.classList.add('world-ring-fg');
     this.worldRingFg.style.strokeDasharray = String(this.worldRingC);
     this.worldRingFg.style.strokeDashoffset = String(this.worldRingC);
-    ringSvg.append(ringDefs, ringTrack, this.worldRingFg);
+    ringSvg.append(ringTrack, this.worldRingFg);
 
     this.worldRingPct = document.createElement('span');
     this.worldRingPct.className = 'world-ring-pct';
