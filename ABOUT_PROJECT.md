@@ -71,8 +71,8 @@ src/
 ├── data/             — ТОЛЬКО данные, ноль логики
 │   ├── gameConfig.ts     — все константы: startingMoney, базы потоков moneyPerTap (A) и passiveBase (P),
 │                            tiers (levelsPerTier=10, weightMultiplierPerTier=2, weightDecayPerTier=0.9 →
-│                            итог x1.8 за эволюцию), subscribers (addIntervalSec=5, clickBonusEvery=5,
-│                            goalMult=1000, rewardMult=100), автосейв (10с), офлайн (макс 8ч, eff 50%, порог 60с), дебаг-шкалы.
+│                            итог x1.8 за эволюцию), subscribers (addIntervalSec=5, clickBonusEvery=1,
+│                            goalMult=500, rewardMult=500), автосейв (10с), офлайн (макс 8ч, eff 50%, порог 60с), дебаг-шкалы.
 │   └── objects.ts        — дата-драйвен список 13 ОБЪЕКТОВ: id, name, group, icon, startLevel (0|1),
 │                            costBase, costGrowth, aWeight/pWeight (вклады в потоки A/P), maxLevel,
 │                            requires? (гейт ветки), tierNames? ТОЛЬКО как число стадий сцены
