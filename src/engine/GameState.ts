@@ -337,8 +337,10 @@ export class GameState {
     for (const o of objectDefs) o.currentLevel = o.startLevel;
     if (snap.objects) {
       for (const [rawId, level] of Object.entries(snap.objects)) {
-        // Миграция id: «Лицо» переименовано в «Причёску» — прогресс переносится.
-        const id = rawId === 'face' ? 'hair' : rawId;
+        // Миграции id (прогресс переносится): «Лицо» → «Причёска»; микрофон
+        // (tech) → камера (camera, решение владельца 2026-10-03). Старые гейты
+        // (навыки → pc → tech) гарантируют, что камера в сейве уже была куплена.
+        const id = rawId === 'face' ? 'hair' : rawId === 'tech' ? 'camera' : rawId;
         const def = objectById.get(id as ObjectDef['id']);
         if (def && Number.isFinite(level) && level > 0) {
           def.currentLevel = Math.min(Math.floor(level), def.maxLevel);

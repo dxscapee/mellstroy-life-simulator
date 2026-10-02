@@ -2,43 +2,35 @@
   "version": 1,
   "assets": {
     "character/0": {
-      "url": "assets/character/0.6258cbad.webp",
+      "url": "assets/character/0.f66d604f.webp",
       "type": "image",
-      "w": 660,
-      "h": 1380,
-      "bytes": 80280,
+      "w": 528,
+      "h": 1104,
+      "bytes": 81246,
       "source": "art/character/0.png"
     },
-    "house/0": {
-      "url": "assets/house/0.20fd172b.webp",
-      "type": "image",
-      "w": 370,
-      "h": 620,
-      "bytes": 16434,
-      "source": "art/house/0.png"
-    },
     "world/0": {
-      "url": "assets/world/0.575b62d7.webp",
+      "url": "assets/world/0.8d5d6a91.webp",
       "type": "image",
-      "w": 1120,
-      "h": 759,
-      "bytes": 23560,
+      "w": 1505,
+      "h": 1020,
+      "bytes": 47640,
       "source": "art/world/0.png"
     },
     "world/1": {
-      "url": "assets/world/1.8a429dc3.webp",
+      "url": "assets/world/1.17b87bc2.webp",
       "type": "image",
-      "w": 1120,
-      "h": 627,
-      "bytes": 115002,
+      "w": 2240,
+      "h": 1254,
+      "bytes": 387334,
       "source": "art/world/1.jpg"
     },
     "world/2": {
-      "url": "assets/world/2.5a18fb84.webp",
+      "url": "assets/world/2.7155011b.webp",
       "type": "image",
-      "w": 1120,
-      "h": 759,
-      "bytes": 124466,
+      "w": 2240,
+      "h": 1518,
+      "bytes": 595994,
       "source": "art/world/2.png"
     }
   }
