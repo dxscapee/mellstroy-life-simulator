@@ -1,4 +1,37 @@
 {
   "version": 1,
-  "assets": {}
+  "assets": {
+    "character/0": {
+      "url": "assets/character/0.f66d604f.webp",
+      "type": "image",
+      "w": 528,
+      "h": 1104,
+      "bytes": 81246,
+      "source": "art/character/0.png"
+    },
+    "world/0": {
+      "url": "assets/world/0.8d5d6a91.webp",
+      "type": "image",
+      "w": 1505,
+      "h": 1020,
+      "bytes": 47640,
+      "source": "art/world/0.png"
+    },
+    "world/1": {
+      "url": "assets/world/1.17b87bc2.webp",
+      "type": "image",
+      "w": 2240,
+      "h": 1254,
+      "bytes": 387334,
+      "source": "art/world/1.jpg"
+    },
+    "world/2": {
+      "url": "assets/world/2.7155011b.webp",
+      "type": "image",
+      "w": 2240,
+      "h": 1518,
+      "bytes": 595994,
+      "source": "art/world/2.png"
+    }
+  }
 }

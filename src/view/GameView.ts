@@ -124,31 +124,36 @@ const CHAR_SPEC: RectSpec = { group: 'character', ...sceneBox('character'), colo
 /**
  * Рабочее место: ТРИ КОНГРУЭНТНЫХ слоя в ОДНОЙ точке, ОДНА геометрия на всех
  * (владелец 2026-09-30: «все объекты должны быть одинаковых размеров») — бокс
- * 350×460 (было 300 → «должны быть выше по высоте»). Слои совпадают по площади
+ * 360×480 из sceneAssets.json (было 300 → «выше по высоте» → 350×460 →
+ * нормализация 8px-сетки 2026-10-03). Слои совпадают по площади
  * один в один, поэтому на экране читается ВЕРХНИЙ (комп, жёлтый), а размер всех
  * трёх виден в подписях; никаких визуальных хитростей с рамками у заглушек нет.
- * Глубина = чертёж: мебель(12) — дальний, микрофон(11) — средний, комп(10) —
+ * Глубина = чертёж: мебель(12) — дальний, камера(11) — средний, комп(10) —
  * ближний; цвета слоёв свои (оранжевый/бирюзовый/жёлтый).
- * lift разводит подписи колонкой над верхом: КОМП → МИКРОФОН → МЕБЕЛЬ.
+ * ВАЖНО: глубина сцены ≠ порядку карточек в магазине (камера → мебель → комп);
+ * сцена сохраняет чертёж, магазин — ТЗ владельца 2026-10-03.
+ * lift разводит подписи колонкой над верхом: КОМП → КАМЕРА → МЕБЕЛЬ.
  */
 // Размеры — из паспорта ассетов; пайплайн проверяет, что три слоя конгруэнтны.
 // (раскладка стопки опирается только на высоту: низ группы стоит на полу)
-const WORKPLACE_H = SCENE_GROUPS.tech.h;
+const WORKPLACE_H = SCENE_GROUPS.camera.h;
 const FURNITURE_SPEC: RectSpec = { group: 'furniture', ...sceneBox('furniture'), color: 0xf59e0b, num: '12', label: 'МЕБЕЛЬ', lift: 0 };
-const TECH_SPEC: RectSpec = { group: 'tech', ...sceneBox('tech'), color: 0x06b6d4, num: '11', label: 'МИКРОФОН', lift: 27 };
+const CAMERA_SPEC: RectSpec = { group: 'camera', ...sceneBox('camera'), color: 0x06b6d4, num: '11', label: 'КАМЕРА', lift: 27 };
 const PC_SPEC: RectSpec = { group: 'pc', ...sceneBox('pc'), color: 0xfacc15, num: '10', label: 'КОМП', lift: 54 };
 
 /**
  * Носимые на игроке: дети контейнера игрока, наследуют его позицию и масштаб.
- * Раскладка — по чертежу крупным планом (владелец 2026-09-30): БОРТ К БОРТУ и
- * без наложений. Координаты — от центра игрока (игрок 330×690: верх −345,
- * низ +345, левый борт −165):
- *   · ПРИЧЁСКА 330×240 — верхняя полоса игрока: впритык к верхнему, левому и
- *     правому бортам (центр −225);
- *   · ОДЕЖДА 330×450 — нижняя полоса: верх = низ причёски (−105), низ = низ
- *     игрока (+345), центр +120;
- *   · ЧАСЫ 150×215 — прижаты к ЛЕВОМУ борту (левый край −165, центр −90), верх
- *     на 15px ниже стыка полос (верх −90, центр +17.5).
+ * Раскладка — по чертежу крупным планом (владелец 2026-09-30, перенормирована
+ * под игрока 264×552 2026-10-03): БОРТ К БОРТУ и без наложений. Координаты —
+ * от центра игрока (верх −276, низ +276, левый борт −132):
+ *   · ПРИЧЁСКА 264×192 — верхняя полоса (1/3 высоты игрока): впритык к верхнему,
+ *     левому и правому бортам (центр −276 + 96 = −180);
+ *   · ОДЕЖДА 264×360 — нижняя полоса (2/3 высоты): верх = низ причёски (−84),
+ *     низ = низ игрока (+276), центр −84 + 180 = +96;
+ *   · ЧАСЫ 120×176 — прижаты к ЛЕВОМУ борту (левый край −132, центр −72), верх
+ *     на 15px ниже стыка полос (верх −69, центр +19).
+ * Причёска + одежда = ровно 552 = высота игрока и 264 = его ширина — полосы
+ * стыкуются без зазоров и нахлёстов (инвариант пайплайна: холсты совпадают).
  * Слои (глубина addChild): тело(1) → причёска(8) + одежда(9) → часы(7).
  * Цвета: ЗЕЛЁНАЯ причёска, СИНЯЯ одежда, ФИОЛЕТОВЫЕ часы, КРАСНЫЙ игрок.
  * lift поднимает подпись только там, где соседи слились бы (причёска↔игрок,
@@ -156,11 +161,11 @@ const PC_SPEC: RectSpec = { group: 'pc', ...sceneBox('pc'), color: 0xfacc15, num
  */
 const WORN_SPECS: Record<'hair' | 'clothes' | 'watch', RectSpec & { ox: number; oy: number }> = {
   // Причёска — верхняя полоса игрока (впритык к верхнему/левому/правому бортам).
-  hair: { group: 'hair', ...sceneBox('hair'), color: 0x22c55e, num: '8', label: 'ПРИЧЁСКА', ox: 0, oy: -225, lift: 26 },
+  hair: { group: 'hair', ...sceneBox('hair'), color: 0x22c55e, num: '8', label: 'ПРИЧЁСКА', ox: 0, oy: -180, lift: 21 },
   // Одежда — нижняя полоса игрока: верх = низ причёски, низ = низ игрока.
-  clothes: { group: 'clothes', ...sceneBox('clothes'), color: 0x2563eb, num: '9', label: 'ОДЕЖДА', ox: 0, oy: 120, lift: 11 },
+  clothes: { group: 'clothes', ...sceneBox('clothes'), color: 0x2563eb, num: '9', label: 'ОДЕЖДА', ox: 0, oy: 96, lift: 9 },
   // Часы — слева, впритык к левому борту; верх на 15px ниже стыка полос.
-  watch: { group: 'watch', ...sceneBox('watch'), color: 0xa855f7, num: '7', label: 'ЧАСЫ', ox: -90, oy: 17.5, lift: 0 },
+  watch: { group: 'watch', ...sceneBox('watch'), color: 0xa855f7, num: '7', label: 'ЧАСЫ', ox: -72, oy: 19, lift: 0 },
 };
 
 /** Якорь динамического объекта: смещение от центра композиции. */
@@ -171,7 +176,11 @@ type DynAnchor = { dx: number; dy: number };
 // 230 → 150 → 140. Побочно упала и доля дрейфа (|dx|/400) — на широких окнах отъезд меньше.
 const CAR_ANCHOR: DynAnchor = { dx: 140, dy: 35 };
 // Игрок сдвинут правее для телефонного экрана (владелец 2026-09-30): -240 → -220.
-const CHAR_ANCHOR: DynAnchor = { dx: -220, dy: 215 };
+// dy: 215 → 75 (владелец 2026-10-03) — игрок был «утоплен вниз»: при центре
+// композиции cy и высоте 690 низ уходил на cy+215+345 ≈ на 110px ПОД таб-бар на
+// телефоне. После уменьшения игрока до 264×552 и подъёма якоря до +75 его низ
+// = cy+75+276, т.е. целиком виден над таб-баром и в портрете, и в ландшафте.
+const CHAR_ANCHOR: DynAnchor = { dx: -220, dy: 75 };
 /**
  * Рабочее место — ОДНА точка на все три конгруэнтных слоя. По X это стол чертежа
  * +30 вправо (владелец 2026-09-30: «положение как у стола, но чуть-чуть правее»),
@@ -214,7 +223,7 @@ export class GameView {
   private house: Container | null = null;
   /** Динамические объекты. */
   private car: Container | null = null;
-  private workplace = new Map<string, Container>(); // tech | pc | furniture
+  private workplace = new Map<string, Container>(); // camera | furniture | pc
   private character: Container | null = null;
   /** Носимые — дети персонажа: watch | hair | clothes. */
   private worn = new Map<string, Container>();
@@ -228,6 +237,12 @@ export class GameView {
   private lastWorldEra = -1;
   /** Ключ ассета, который сейчас на фоне (null — заглушка). */
   private appliedWorldKey: string | null = null;
+  /**
+   * Принудительный показ подписей ВСЕХ объектов (номер · имя · размер) —
+   * дебаг-фича из панели (кнопка «Подписи объектов»). По умолчанию ВЫКЛ:
+   * подписи живут только на заглушках, т.е. там, где текстуры ещё нет.
+   */
+  private labelsForced = false;
 
   /** Базовый масштаб персонажа — точка возврата сквиш-эффекта при тапе. */
   private charBaseScale = 1;
@@ -340,6 +355,8 @@ export class GameView {
     });
     mark.anchor.set(0.5, 1);
     mark.position.set(0, Math.round(-spec.h / 2) - 6 - (spec.lift ?? 0));
+    // Видимость — строго по флагу показа подписей (по умолчанию ВЫКЛ).
+    mark.visible = this.labelsForced;
     c.addChild(mark);
     this.visuals.set(c, { spec, gfx: g, label: mark, sprite, stage: -1, appliedKey: null });
 
@@ -367,20 +384,20 @@ export class GameView {
   }
 
   /**
-   * Рабочее место: мебель(12) → микрофон(11) → комп(10), все динамические.
+   * Рабочее место: мебель(12) → камера(11) → комп(10), все динамические.
    * Порядок addChild = ГЛУБИНА (мебель дальняя, комп ближний) — по чертежу
-   * владельца; геометрия у всех трёх одна (см. WORKPLACE_ANCHOR).
+   * владельца; геометрия у всех трёх одна (см. placeWorkplace).
    */
   private buildWorkplace(): void {
     const furniture = this.buildRect(FURNITURE_SPEC);
-    const tech = this.buildRect(TECH_SPEC);
+    const camera = this.buildRect(CAMERA_SPEC);
     const pc = this.buildRect(PC_SPEC);
 
     this.workplace.set('furniture', furniture);
-    this.workplace.set('tech', tech);
+    this.workplace.set('camera', camera);
     this.workplace.set('pc', pc);
 
-    for (const item of [furniture, tech, pc]) {
+    for (const item of [furniture, camera, pc]) {
       item.visible = false; // появляется после покупки
       this.app.stage.addChild(item);
     }
@@ -487,15 +504,15 @@ export class GameView {
    */
   private placeWorkplace(x: number, y: number): void {
     const furniture = this.workplace.get('furniture');
-    const tech = this.workplace.get('tech');
+    const camera = this.workplace.get('camera');
     const pc = this.workplace.get('pc');
     if (furniture) furniture.position.set(x, y);
-    if (tech) tech.position.set(x, y);
+    if (camera) camera.position.set(x, y);
     if (pc) pc.position.set(x, y);
   }
 
   /**
-   * Метка фона (5 · ФОН · 1120×1505) — у нижнего-левого угла прямоугольника
+   * Метка фона (5 · ФОН · 1120×759) — у нижнего-левого угла прямоугольника
    * фона (верх занят HUD, верхний угол часто за краем из-за cover).
    */
   private placeWorldLabel(): void {
@@ -503,6 +520,8 @@ export class GameView {
     if (!this.worldLabel) {
       this.worldLabel = new Text({ text, style: this.markerStyle() });
       this.worldLabel.anchor.set(0, 1);
+      // Видимость — строго по флагу показа подписей (по умолчанию ВЫКЛ).
+      this.worldLabel.visible = this.labelsForced;
       this.app.stage.addChild(this.worldLabel);
     } else if (this.worldLabel.text !== text) {
       this.worldLabel.text = text;
@@ -561,7 +580,6 @@ export class GameView {
         this.appliedWorldKey = null;
       }
       this.world.setTexture(null);
-      this.setWorldLabelVisible(true);
       return;
     }
 
@@ -571,15 +589,22 @@ export class GameView {
     this.world.setTexture(texture);
     if (this.appliedWorldKey) this.assets.release(this.appliedWorldKey);
     this.appliedWorldKey = key;
-    this.setWorldLabelVisible(false);
-  }
-
-  /** Метка фона видна только на заглушке (как и подписи объектов). */
-  private setWorldLabelVisible(visible: boolean): void {
-    if (this.worldLabel) this.worldLabel.visible = visible;
   }
 
   // ---------------------------------------------------------------- текстуры
+
+  /**
+   * Показать/скрыть ПОДПИСИ ОБЪЕКТОВ (номер · имя · размер) — ДЕБАГ-ФИЧА
+   * (кнопка в дебаг-панели; из консоли — scene.setObjectLabels(true)).
+   * ВЫКЛ (по умолчанию): подписи скрыты У ВСЕХ — и на заглушках, и поверх
+   * текстур. ВКЛ: подписи ВСЕХ объектов + метка фона.
+   * Рамки-заглушки (gfx) не трогаем: под текстурой они не нужны.
+   */
+  setObjectLabels(visible: boolean): void {
+    this.labelsForced = visible;
+    for (const rec of this.visuals.values()) this.syncLabelVisibility(rec);
+    if (this.worldLabel) this.worldLabel.visible = visible;
+  }
 
   /** Пере-синхронизация всех видимых узлов и фона после догрузки ассетов. */
   refreshTextures(): void {
@@ -623,16 +648,24 @@ export class GameView {
     rec.sprite.height = rec.spec.h;
     rec.sprite.visible = true;
     rec.gfx.visible = false;
-    rec.label.visible = false;
     rec.appliedKey = key;
+    this.syncLabelVisibility(rec);
   }
 
   /** Вернуть узел к прямоугольнику-заглушке (ассет исчез из манифеста). */
   private showPlaceholder(rec: RectVisual): void {
     rec.sprite.visible = false;
     rec.gfx.visible = true;
-    rec.label.visible = true;
     rec.appliedKey = null;
+    this.syncLabelVisibility(rec);
+  }
+
+  /**
+   * Единое правило видимости подписи узла: подписи видны ТОЛЬКО при
+   * включённом показе из дебаг-панели (labelsForced, по умолчанию ВЫКЛ).
+   */
+  private syncLabelVisibility(rec: RectVisual): void {
+    rec.label.visible = this.labelsForced;
   }
 
   // ------------------------------------------------------------ тиры сцены
@@ -663,7 +696,7 @@ export class GameView {
             if (s.owned) this.setStage(this.yard, s.tier);
           }
           break;
-        case 'tech':
+        case 'camera':
         case 'pc':
         case 'furniture': {
           const item = this.workplace.get(s.id);

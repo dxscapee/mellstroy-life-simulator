@@ -180,7 +180,7 @@ function scanMasters(config, warnings, errors) {
   }
 
   // Три слоя рабочего места обязаны быть конгруэнтны (на них держится стопка).
-  const trio = ['furniture', 'tech', 'pc'];
+  const trio = ['furniture', 'camera', 'pc'];
   if (trio.every((g) => config.groups[g])) {
     const [a, b, c] = trio.map((g) => `${config.groups[g].w}×${config.groups[g].h}`);
     if (!(a === b && b === c)) {

@@ -7,7 +7,7 @@ export type ObjectGroup = 'property' | 'outfit' | 'workplace' | 'skills';
  * Режим покупки в магазине (радио сверху выноски, выбор пользователя):
  *  - 'one'  — строго один уровень за действие;
  *  - 'tier' — максимум доступного на текущие деньги, но НЕ дальше конца
- *             текущего грейда (tiers.levelsPerTier): прогресс-бар обнуляется.
+ *             текущего грейда (tiers.levelsPerTier): бар доливается и стартует новый.
  */
 export type BuyMode = 'one' | 'tier';
 
@@ -15,8 +15,8 @@ export type BuyMode = 'one' | 'tier';
 export type ObjectId =
   | 'house' | 'car' | 'bg'
   | 'watch' | 'hair' | 'clothes'
-  | 'tech' | 'pc' | 'furniture'
-  | 'charisma' | 'emotion' | 'humor';
+  | 'camera' | 'furniture' | 'pc'
+  | 'charisma' | 'intellect' | 'humor' | 'emotion';
 
 /**
  * Прокачиваемый объект. Статические данные задаёт data/objects.ts;
@@ -42,7 +42,11 @@ export interface ObjectDef {
   readonly desc: string;
   /** Объект нельзя купить, пока у этого объекта уровень 0 (гейт веток). */
   readonly requires?: ObjectId;
-  /** Названия визуальных стадий (index = tier); показывается в карточке. */
+  /**
+   * Названия визуальных стадий (index = tier). В карточке НЕ показываются
+   * (имена объектов статичны, 2026-10-03) — массив нужен ТОЛЬКО как число
+   * стадий сцены (tierOf/assetKey) и чтобы объект считался сценовым.
+   */
   readonly tierNames?: readonly string[];
   /** Текущий уровень (runtime). НЕ задавать вручную вне GameState. */
   currentLevel: number;

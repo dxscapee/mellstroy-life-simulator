@@ -57,7 +57,7 @@ export const OBJECT_ASSET_GROUP: Partial<Record<ObjectId, AssetGroup>> = {
   clothes: 'clothes',
   watch: 'watch',
   furniture: 'furniture',
-  tech: 'tech',
+  camera: 'camera',
   pc: 'pc',
 };
 

@@ -20,6 +20,8 @@ const canvasHost = document.getElementById('canvas-host')!;
 const uiRoot = document.getElementById('ui-root')!;
 
 let game: Game | null = null;
+/** Сцена — нужна дебаг-панели (кнопка подписей объектов), только в DEV. */
+let scene: GameView | null = null;
 
 /**
  * Ключи стартового набора: фон текущей эпохи, тело игрока и текстуры всех
@@ -80,8 +82,12 @@ async function bootstrap(): Promise<void> {
   view.applyWorldStage(game.worldWatch.stage.era);
   events.on('world:changed', ({ era }) => view.applyWorldStage(era));
 
-  // 4) Слой UI.
-  const ui = new UIManager(uiRoot, game);
+  // 4) Слой UI. Превью эпох для галереи: URL фона из манифеста (ui про view не знает).
+  const ui = new UIManager(uiRoot, game, (era) => {
+    const key = assets.resolveKey(WORLD_ASSET_GROUP, era);
+    const entry = key ? assets.entry(key) : null;
+    return entry ? { url: entry.url, kind: entry.type } : null;
+  });
 
   // Офлайн-модалка: подписка на будущее + учёт уже случившегося (событие
   // эмитится из конструктора Game раньше, чем UI успел подписаться).
@@ -107,6 +113,7 @@ async function bootstrap(): Promise<void> {
     handles.game = game;
     handles.assets = assets;
     handles.scene = view;
+    scene = view; // для дебаг-панели (в проде ветка мертва)
     console.info('%c[App] Игра запущена', 'color:#2ecc71;font-weight:bold');
   }
 }
@@ -126,6 +133,6 @@ const appReady = bootstrap().catch((err) => {
 if (import.meta.env.DEV) {
   void appReady.then(async () => {
     const { setupDebugPanel } = await import('@debug/debugPanel');
-    if (game) setupDebugPanel(game);
+    if (game && scene) setupDebugPanel(game, scene);
   });
 }
