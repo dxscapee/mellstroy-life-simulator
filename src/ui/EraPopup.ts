@@ -1,6 +1,7 @@
 import Decimal from 'break_infinity.js';
 import { WORLD_ERA_NAMES, WORLD_VEGETATION_NAMES, WORLD_EXP_STEP } from '@data/worldStages';
-import type { WorldWatch } from '@engine/WorldProgress';
+import type { Game } from '@engine/Game';
+import { worldProgressFrac } from '@engine/WorldProgress';
 import { formatMoney } from '@engine/format';
 
 /**
@@ -18,9 +19,12 @@ import { formatMoney } from '@engine/format';
  *
  * Нижняя строка — по ПРОСМАТРИВАЕМОЙ странице (не по текущей эпохе игрока):
  * пройдено / текущий прогресс с фазой растительности / порог открытия.
- * Обновление — по дифу (страница + эпоха + целый процент); DOM-строки строятся
- * один раз. Закрыта = opacity+visibility+pointer-events:none (тот же инвариант,
- * что у модалки офлайна: скрытая не ловит тапы).
+ * Прогресс % — ЖИВАЯ дробь worldProgressFrac(totalEarned), а не stage.eraProgress:
+ * кэш WorldWatch заморожен между сменами периода (тот же фикс, что у кольца HUD —
+ * иначе бар меню стоял бы на месте, пока кольцо живёт). Обновление — по дифу
+ * (страница + эпоха + целый процент); DOM-строки строятся один раз. Закрыта =
+ * opacity+visibility+pointer-events:none (тот же инвариант, что у модалки офлайна:
+ * скрытая не ловит тапы).
  */
 
 /** Иконки эпох (плейсхолдеры; потом — превьюшки текстур фона). */
@@ -71,7 +75,8 @@ export class EraPopup {
 
   constructor(
     uiRoot: HTMLElement,
-    private readonly world: WorldWatch,
+    /** Игра нужна для живого прогресса: totalEarned (дробь) + stage (эпоха/период). */
+    private readonly game: Game,
     private readonly preview?: EraPreviewProvider,
   ) {
     const total = WORLD_ERA_NAMES.length;
@@ -174,7 +179,7 @@ export class EraPopup {
 
   /** Открытие: всегда на странице ТЕКУЩЕЙ эпохи игрока. */
   open(): void {
-    this.selectEra(this.world.stage.era, true);
+    this.selectEra(this.game.worldWatch.stage.era, true);
     this.isOpen = true;
     this.pop.classList.add('open');
   }
@@ -203,8 +208,10 @@ export class EraPopup {
 
   /** Обновление по дифу (см. ObjectSheet.refresh — только изменения в DOM). */
   refresh(force = false): void {
-    const { era, eraProgress } = this.world.stage;
-    const pct = Math.round(eraProgress * 100);
+    const { era } = this.game.worldWatch.stage;
+    // floor — ТО ЖЕ округление, что у кольца HUD (renderWorldRing), иначе меню
+    // и кольцо расходятся на 1% (round vs floor) на границах долей процента.
+    const pct = Math.floor(worldProgressFrac(this.game.state.totalEarned) * 100);
 
     // Смена эпохи/сброс: у страниц меняется статус «будущая ↔ открыта» —
     // такие слоты перестраиваем («?» ↔ фон эпохи).
@@ -234,8 +241,8 @@ export class EraPopup {
 
   /** Нижняя строка — по ПРОСМАТРИВАЕМОЙ странице. */
   private renderStrip(): void {
-    const { era, period } = this.world.stage;
-    const pct = Math.round(this.world.stage.eraProgress * 100);
+    const { era, period } = this.game.worldWatch.stage;
+    const pct = Math.floor(worldProgressFrac(this.game.state.totalEarned) * 100);
     const view = this.index;
 
     this.stripIcon.textContent = ERA_ICONS[view] ?? '🗺️';
@@ -281,7 +288,7 @@ export class EraPopup {
     this.mediaState[era] = 'placeholder';
 
     // Будущая эпоха: содержимое уровня не показываем — только «?».
-    if (era > this.world.stage.era) {
+    if (era > this.game.worldWatch.stage.era) {
       const unknown = document.createElement('div');
       unknown.className = 'era-media-unknown';
       unknown.textContent = '?';

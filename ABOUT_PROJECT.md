@@ -134,7 +134,8 @@ src/
 │   └── Game.ts           — ФАСАД ядра: владеет state/loop/saveManager; тик: доход→worldWatch (смена
 │                            периода мира → emit('world:changed'))→таймер подписчиков
 │                            (раз в 5с addSubscribersFromPassive)→автосейв→emit('tick').
-│                            worldWatch — readonly-поле (UIManager/EraPopup читают .stage).
+│                            worldWatch — readonly-поле (UIManager читает .stage; EraPopup получает
+│                            Game целиком: эпоха/период — из .stage, живой прогресс — state.totalEarned).
 │                            API: handleTap (внутри — бонус подписчиков), buyObject(id, mode) —
 │                            пачечная покупка, события ('object:levelup' + 'money:changed') эмитятся
 │                            ОДИН раз на всю пачку,
@@ -214,7 +215,9 @@ src/
 │                            первому жесту, release закрывает декодер. О раскладке не знает.
 ├── ui/               — HTML-оверлей (z-index 10)
 │   ├── styles.css        — #ui-root{pointer-events:none}, button/.js-interactive{auto};
-│                            .sheet-modes/.mode-btn — радио режима покупки (активный = --accent),
+│                            .sheet-modes/.mode-btn — радио режима покупки КОМПАКТНЫМИ
+│                            пилюлями (flex:0 0 auto, слева, подписи «1 ур.»/«max» — ТЗ
+│                            владельца 2026-10-02; активный = --accent),
 │                            .upgrade-buy: touch-action:none + user-select:none (зажатие кнопки
 │                            не должно уезжать в скролл списка и выделять текст);
 │                            .modal-backdrop: visibility+pointer-events при скрытии (см. Грабли #2);
@@ -274,7 +277,10 @@ src/
 │                            клик — EraPopup (та же функция, что была у чипа); на world:changed —
 │                            вспышка .evolved на кольце (рестарт через offsetWidth).
 │                            ПОДПИСЬ ЛОКАЦИИ .world-label под кольцом (тапы сквозь неё — в сцену):
-│                            текст = WORLD_ERA_NAMES
+│                            ЦЕНТР ПОД КОЛЬЦОМ (фикс 2026-10-02): left: calc(--ring-gap / -2) при
+│                            ширине 100%+--ring-gap — центр бокса = центр кольца, text-align:center
+│                            ставит текст ровно под ним (было left:0 → текст уходил вправо на
+│                            gap/2 = 5px; замер вживую: delta 0 после фикса). Текст = WORLD_ERA_NAMES
 │                            [worldWatch.stage.era] (единственный вернувшийся в UI импорт
 │                            WORLD_*_NAMES); renderWorldLabel() — по world:changed / game:reset
 │                            и один раз в конструкторе (эпоха меняется редко, в тике не нужна).
@@ -306,7 +312,8 @@ src/
 │                            shownAffordable/cachedCost); renderLevelDependent — бар+подпись+кнопка при смене уровня.
 │                            Состояния: locked (🔒 + «Нужен: X»), level 0 («Не куплено»), owned, maxed («Максимальная эволюция»).
 │                            РЕЖИМ ПОКУПКИ: радио .sheet-modes сверху выноски (role=radiogroup,
-│                            активный .mode-btn.active) — 'one' (ПО 1 УРОВНЮ) | 'tier' (НА ВСЕ ДЕНЬГИ);
+│                            активный .mode-btn.active) — 'one' («1 ур.») | 'tier' («max»),
+│                            пилюли fit-content слева, высота строки ~31px (ТЗ 2026-10-02);
 │                            setBuyMode сбрасывает зажатие и зовёт refresh(true). ЗАЖАТИЕ КНОПКИ:
 │                            pointerdown заводит таймер HOLD_DELAY_MS 420мс (до него покупок НЕТ —
 │                            юзер успевает отпустить), дальше шаги HOLD_REPEAT_MS 120мс, после
@@ -332,6 +339,13 @@ src/
 │                            future/placeholder/image/video), при смене эпохи «?» ↔ фон перестраивается;
 │                            обновление по дифу (index/era/pct); открытие — всегда на текущей эпохе;
 │                            isOpenState() — UIManager обновляет только открытым.
+│                            ПРОГРЕСС % — ЖИВОЙ (фикс 2026-10-02): constructor(uiRoot, game: Game,
+│                            preview?) — НЕ WorldWatch; pct в refresh()/renderStrip() =
+│                            floor(worldProgressFrac(state.totalEarned)*100) — та же живая дробь
+│                            и то же округление, что у кольца. Раньше брался кэш stage.eraProgress,
+│                            ЗАМОРОЖЕННЫЙ между сменами периода (WorldWatch обновляет current только
+│                            на смене) — меню показывало 0%, пока кольцо жило; refresh() зовётся
+│                            из onTick на КАЖДОМ тике пока открыта (кольцо — каждые 5 тиков).
 │   ├── OfflineModal.ts   — универсальная модалка show(title, body, buttonText, onClose).
 │   └── BootScreen.ts     — загрузочный оверлей #boot-screen (разметка в index.html, стили в
 │                            styles.css): setStatus/setProgress/hide. Скрывается перед
@@ -1023,3 +1037,15 @@ grep -rl "debug-panel\|setupDebugPanel\|window.game" dist/   # должно бы
   Проверено вживую (dev 5050): track 280px (до правки был 0), fill красный, все 4 значения
   + счёт белые rgb(245,246,247), кольцо: bg rgba(16,20,24,0.82), border 8%, дуга
   rgb(46,204,113), defs в SVG нет; tsc + build зелёные, в dist нет world-ring-gradient.
+- 2026-10-02 — ФИКС ДВУХ UI-БАГОВ (по фидбеку владельца): (1) ЦЕНТРИРОВАНИЕ ПОДПИСИ
+  .world-label ПОД КОЛЬЦОМ: left: calc(--ring-gap / -2) вместо left:0 — центр бокса
+  подписи совпадает с центром кольца (text-align:center центрировал по боксу
+  «кольцо+зазор», текст уходил вправо на gap/2 = 5px; замер вживую: delta 0 после,
+  +5px до). (2) ПРОГРЕСС В ПОПАПЕ EraPopup — ЖИВОЙ: constructor получает Game (а не
+  WorldWatch), pct в refresh()/renderStrip() считается от worldProgressFrac(
+  state.totalEarned) с округлением floor — как у кольца (раньше — кэш stage.eraProgress,
+  замороженный между сменами периода: меню стояло на 0%, пока кольцо показывало живые
+  %; ранее тот же паттерн чинился для кольца — worldProgressFrac, Журнал #15). Проверено
+  вживую (dev 5050): подпись delta 0 от центра кольца; меню = кольцо (11% == 11%),
+  инъект totalEarned ×3 сразу двигает % и бар меню (31%), после отката state/save
+  чистые; tsc + build зелёные.

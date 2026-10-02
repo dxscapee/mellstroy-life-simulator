@@ -67,7 +67,7 @@ export class UIManager {
     this.worldRingC = 2 * Math.PI * WORLD_RING_R;
     // Попап-галерея эпох: открывается кольцом прогресса (см. ниже). Раньше
     // его открывал и чип эпохи в HUD — чипа больше нет, роль осталась кольцу.
-    this.eraPopup = new EraPopup(uiRoot, game.worldWatch, eraPreview);
+    this.eraPopup = new EraPopup(uiRoot, game, eraPreview);
 
     // ---------- верхняя панель: блок плашек + кольцо и настройки по его краям ----------
     // .hud-bar центрируется как одно целое (та же ширина, что у нижнего меню).

@@ -162,9 +162,11 @@ export class ObjectSheet {
     row.setAttribute('role', 'radiogroup');
     row.setAttribute('aria-label', 'Режим покупки');
 
+    // Подписи короткие по ТЗ владельца (2026-10-02): «1 ур.» | «max»;
+    // полные объяснения режима остаются в title (hint) у кнопок.
     const items: { mode: BuyMode; label: string; hint: string }[] = [
-      { mode: 'one', label: 'ПО 1 УРОВНЮ', hint: 'Одно нажатие — один уровень' },
-      { mode: 'tier', label: 'НА ВСЕ ДЕНЬГИ', hint: 'Сразу до конца грейда — бар обнуляется' },
+      { mode: 'one', label: '1 ур.', hint: 'Одно нажатие — один уровень' },
+      { mode: 'tier', label: 'max', hint: 'Сразу до конца грейда — бар обнуляется' },
     ];
 
     for (const item of items) {
