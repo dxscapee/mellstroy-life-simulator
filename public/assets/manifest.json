@@ -1,4 +1,45 @@
 {
   "version": 1,
-  "assets": {}
+  "assets": {
+    "character/0": {
+      "url": "assets/character/0.6258cbad.webp",
+      "type": "image",
+      "w": 660,
+      "h": 1380,
+      "bytes": 80280,
+      "source": "art/character/0.png"
+    },
+    "house/0": {
+      "url": "assets/house/0.20fd172b.webp",
+      "type": "image",
+      "w": 370,
+      "h": 620,
+      "bytes": 16434,
+      "source": "art/house/0.png"
+    },
+    "world/0": {
+      "url": "assets/world/0.575b62d7.webp",
+      "type": "image",
+      "w": 1120,
+      "h": 759,
+      "bytes": 23560,
+      "source": "art/world/0.png"
+    },
+    "world/1": {
+      "url": "assets/world/1.8a429dc3.webp",
+      "type": "image",
+      "w": 1120,
+      "h": 627,
+      "bytes": 115002,
+      "source": "art/world/1.jpg"
+    },
+    "world/2": {
+      "url": "assets/world/2.5a18fb84.webp",
+      "type": "image",
+      "w": 1120,
+      "h": 759,
+      "bytes": 124466,
+      "source": "art/world/2.png"
+    }
+  }
 }
