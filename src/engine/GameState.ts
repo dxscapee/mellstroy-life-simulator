@@ -92,7 +92,7 @@ export class GameState {
     }
 
     // Грейд — каждые levelsPerTier уровней. Уровень 0 (объект не куплен) считаем
-    // НАЧАЛОМ грейда: «до конца грейда» = perTier уровней (10, 20, 30…), а не 0.
+    // НАЧАЛОМ грейда: «до конца грейда» = perTier уровней, а не 0.
     const perTier = gameConfig.tiers.levelsPerTier;
     const toTierEnd = perTier - (def.currentLevel % perTier);
     const cap = mode === 'one'

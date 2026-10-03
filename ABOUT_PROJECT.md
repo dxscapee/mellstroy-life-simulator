@@ -10,7 +10,7 @@
 
 2D **Idle Tycoon** (в духе Lamar — Idle Vlogger) для платформы **Яндекс Игры**.
 На сцене: персонаж, за ним дом, тачка (после покупки). Всё прокачиваемое — ОБЪЕКТЫ
-(13 шт., 4 группы-вкладки): у объекта уровень, каждые 10 уровней (levelsPerTier) —
+(13 шт., 4 группы-вкладки): у объекта уровень, каждые 30 уровней (levelsPerTier) —
 ЭВОЛЮЦИЯ (меняется ВИЗУАЛЬНАЯ стадия-текстура и усиливается вклад в доход, итог ×1.8).
 ИМЕНА СТАТИЧНЫ и обобщены (Недвижимость/Транспорт/Двор/…, решение владельца 2026-10-03).
 Часть объектов изначально не куплена (уровень 0) — их покупают. Гейты `requires`:
@@ -70,11 +70,14 @@ src/
 │                       динамический import(). window.game/assets/scene (консольный доступ) — только в DEV.
 ├── data/             — ТОЛЬКО данные, ноль логики
 │   ├── gameConfig.ts     — все константы: startingMoney, базы потоков moneyPerTap (A) и passiveBase (P),
-│                            tiers (levelsPerTier=10, weightMultiplierPerTier=2, weightDecayPerTier=0.9 →
-│                            итог x1.8 за эволюцию), subscribers (addIntervalSec=5, clickBonusEvery=1,
+│                            tiers (levelsPerTier=30 — полный прогресс-бар = 30 уровней, решение
+│                            владельца 2026-10-03; weightMultiplierPerTier=2, weightDecayPerTier=0.9 →
+│                            итог x1.8 за эволюцию), pricing (upgradeMarkup=1.15 — базовая наценка
+│                            за уровень, skillMarkup=1.25 — навыки; отдельная точка тюнинга цен), subscribers (addIntervalSec=5, clickBonusEvery=1,
 │                            goalMult=500, rewardMult=500), автосейв (10с), офлайн (макс 8ч, eff 50%, порог 60с), дебаг-шкалы.
 │   └── objects.ts        — дата-драйвен список 13 ОБЪЕКТОВ: id, name, group, icon, startLevel (0|1),
-│                            costBase, costGrowth, aWeight/pWeight (вклады в потоки A/P), maxLevel,
+│                            costBase, costGrowth (= gameConfig.pricing.*, свой литерал в дефе нет),
+│                            aWeight/pWeight (вклады в потоки A/P), maxLevel,
 │                            requires? (гейт ветки), tierNames? ТОЛЬКО как число стадий сцены
 │                            (в карточке имена НЕ показываются — name статичен), currentLevel (runtime!).
 │                            + groupMeta/groupOrder (вкладки), objectById (Map), getObject(),
@@ -115,7 +118,8 @@ src/
 │                            (после claim: goal += 500×тап — накопленный рост целей).
 │                            Инвалидация кэшей — invalidateCaches() ПОСЛЕ любого изменения уровней
 │                            (buyUpgrade/loadFromSnapshot/resetProgress/applyLevels — ИНАЧЕ старые доходы).
-│                            getUpgradeCost = costBase*costGrowth^level; isUnlocked (гейт requires);
+│                            getUpgradeCost = costBase*costGrowth^level (costGrowth — из gameConfig.pricing);
+│                            isUnlocked (гейт requires);
 │                            isMaxed; getBuyPlan(def, mode) — ПЛАН покупки на одно действие
 │                            (count + суммарная стоимость; 'tier' режет пачку на конце грейда,
 │                            не меняет состояние — его читает UI для кнопки); buyUpgradeBulk(def, mode)
@@ -491,8 +495,9 @@ src/
 9. **Сейв v2 без миграции:** экономика сломана концептуально, старые сейвы несовместимы —
    новый ключ 'idle_tycoon_save_v2' (старый просто игнорируется).
 10. **Эволюция x1.8 за тир, а не x2:** вклад растёт (×2), но процент за уровень ослабевает (×0.9)
-   — по ТЗ «по ходу прокачки немного апается процент получения». Уровней в тире — 10 (прогресс-бар
-   карточки). Сейвы при смене levelsPerTier не ломаются: уровень абсолютен, тир выводится из него.
+   — по ТЗ «по ходу прокачки немного апается процент получения». Уровней в тире — 30 (прогресс-бар
+   карточки; было 10 — решение владельца 2026-10-03). Сейвы при смене levelsPerTier не ломаются:
+   уровень абсолютен, тир выводится из него.
 11. **Подписчики: цель цикла ФИКСИРУЕТСЯ в момент старта (goal в SubscriberState, не кэш):**
    рост тапа в середине цикла цель не двигает — иначе чип «убегал» бы от игрока при активной прокачке.
    После claim: goal += goalMult × тап (цели растут накопленно), награда = rewardMult × тап на момент

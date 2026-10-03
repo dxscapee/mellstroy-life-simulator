@@ -45,7 +45,7 @@ const TIER_STAGES: Partial<Record<ObjectId, readonly string[]>> = {
 
 const house: ObjectDef = {
   id: 'house', name: 'Недвижимость', group: 'property', icon: '🏠',
-  startLevel: 1, costBase: $(75), costGrowth: 1.15,
+  startLevel: 1, costBase: $(75), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.05, pWeight: 0.25, maxLevel: 100,
   desc: 'Твой угол. Основной источник пассива.',
   tierNames: HOUSE_STAGES,
@@ -54,7 +54,7 @@ const house: ObjectDef = {
 
 const car: ObjectDef = {
   id: 'car', name: 'Транспорт', group: 'property', icon: '🚗',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.06, pWeight: 0.20, maxLevel: 100,
   desc: 'Возит на съёмки: пассив капает стабильнее.',
   requires: 'house',
@@ -64,7 +64,7 @@ const car: ObjectDef = {
 
 const bg: ObjectDef = {
   id: 'bg', name: 'Двор', group: 'property', icon: '🌆',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.04, pWeight: 0.18, maxLevel: 100,
   desc: 'Чем богаче двор, тем больше подписчиков.',
   requires: 'house',
@@ -76,7 +76,7 @@ const bg: ObjectDef = {
 
 const watch: ObjectDef = {
   id: 'watch', name: 'Часы', group: 'outfit', icon: '⌚',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.05, pWeight: 0.20, maxLevel: 100,
   desc: 'Статус на запястье: пассив капает бодрее.',
   requires: 'house',
@@ -86,7 +86,7 @@ const watch: ObjectDef = {
 
 const hair: ObjectDef = {
   id: 'hair', name: 'Причёска', group: 'outfit', icon: '💇',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.05, pWeight: 0.18, maxLevel: 100,
   desc: 'Причёска решает: подписчики за стиль.',
   requires: 'house',
@@ -96,7 +96,7 @@ const hair: ObjectDef = {
 
 const clothes: ObjectDef = {
   id: 'clothes', name: 'Одежда', group: 'outfit', icon: '👕',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.04, pWeight: 0.20, maxLevel: 100,
   desc: 'Брендовый лук: подписчики за стиль.',
   requires: 'house',
@@ -110,7 +110,7 @@ const clothes: ObjectDef = {
 
 const camera: ObjectDef = {
   id: 'camera', name: 'Камера', group: 'workplace', icon: '📷',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.25, pWeight: 0.05, maxLevel: 100,
   desc: 'Первый шаг к контенту и ключ ко всей ветке.',
   requires: 'house',
@@ -120,7 +120,7 @@ const camera: ObjectDef = {
 
 const furniture: ObjectDef = {
   id: 'furniture', name: 'Мебель', group: 'workplace', icon: '🪑',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.45, pWeight: 0.05, maxLevel: 100,
   desc: 'Комфортное место силы: максимум с тапа.',
   requires: 'camera',
@@ -130,7 +130,7 @@ const furniture: ObjectDef = {
 
 const pc: ObjectDef = {
   id: 'pc', name: 'Комп', group: 'workplace', icon: '🖥️',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
   aWeight: 0.35, pWeight: 0.05, maxLevel: 100,
   desc: 'Монтаж быстрее: тап бьёт сильнее.',
   requires: 'furniture',
@@ -145,7 +145,7 @@ const pc: ObjectDef = {
 
 const charisma: ObjectDef = {
   id: 'charisma', name: 'Харизма', group: 'skills', icon: '🗣️',
-  startLevel: 0, costBase: $(500), costGrowth: 1.25,
+  startLevel: 0, costBase: $(500), costGrowth: gameConfig.pricing.skillMarkup,
   aWeight: 0.8, pWeight: 0, maxLevel: 50,
   desc: 'Каждый уровень: +80% к доходу за тап.',
   requires: 'camera',
@@ -154,7 +154,7 @@ const charisma: ObjectDef = {
 
 const intellect: ObjectDef = {
   id: 'intellect', name: 'Интеллект', group: 'skills', icon: '💡',
-  startLevel: 0, costBase: $(800), costGrowth: 1.25,
+  startLevel: 0, costBase: $(800), costGrowth: gameConfig.pricing.skillMarkup,
   aWeight: 1.0, pWeight: 0, maxLevel: 50,
   desc: 'Каждый уровень: +100% к доходу за тап.',
   requires: 'camera',
@@ -163,7 +163,7 @@ const intellect: ObjectDef = {
 
 const humor: ObjectDef = {
   id: 'humor', name: 'Юмор', group: 'skills', icon: '🤡',
-  startLevel: 0, costBase: $(1200), costGrowth: 1.25,
+  startLevel: 0, costBase: $(1200), costGrowth: gameConfig.pricing.skillMarkup,
   aWeight: 1.2, pWeight: 0, maxLevel: 50,
   desc: 'Каждый уровень: +120% к доходу за тап.',
   requires: 'camera',
@@ -172,7 +172,7 @@ const humor: ObjectDef = {
 
 const emotion: ObjectDef = {
   id: 'emotion', name: 'Эмоциональность', group: 'skills', icon: '😤',
-  startLevel: 0, costBase: $(2000), costGrowth: 1.25,
+  startLevel: 0, costBase: $(2000), costGrowth: gameConfig.pricing.skillMarkup,
   aWeight: 1.5, pWeight: 0, maxLevel: 50,
   desc: 'Каждый уровень: +150% к доходу за тап.',
   requires: 'camera',

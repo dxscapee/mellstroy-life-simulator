@@ -31,7 +31,7 @@ export interface ObjectDef {
   readonly startLevel: 0 | 1;
   /** Цена уровня 1. Для startLevel: 0 это и есть цена «покупки» объекта. */
   readonly costBase: Decimal;
-  /** Множитель цены за каждый следующий уровень. */
+  /** Множитель цены за каждый следующий уровень (значение берётся из gameConfig.pricing). */
   readonly costGrowth: number;
   /** Вклад уровня в АКТИВНЫЙ поток: +aWeight×100% к базе тапа. */
   readonly aWeight: number;
