@@ -13,7 +13,7 @@ import { SCENE_GROUPS } from '@data/assets';
  * sceneAssets.json — только номинальный кадр и заглушка; аспект мастера
  * world/0 = 1.475 совпадает с ним).
  *
- * Текстуру ставит GameView.applyWorldStage по манифесту (setTexture(null) —
+ * Текстуру ставит GameView.applyLocation по манифесту (setTexture(null) —
  * вернуть заглушку). Слою безразлично, картинка это или видео: и то и другое
  * приходит сюда как Texture. Мировые эпохи: world/<эпоха>.
  */

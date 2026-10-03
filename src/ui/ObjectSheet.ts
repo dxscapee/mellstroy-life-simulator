@@ -65,7 +65,9 @@ interface CardRefs {
  *  - locked:   гейт `requires` не пройден — кнопка 🔒, условие в подписи бара;
  *  - level 0:  кнопка = цена первой покупки, бар пустой;
  *  - owned:    бар = level % levelsPerTier, кнопка = цена следующего уровня;
- *  - maxed:    кнопка MAX, бар полный.
+ *  - loc-cap:  объект на КАПЕ локации — бар полный, кнопка 🔒 (дальше только
+ *              переход на следующую локацию через кольцо/попап);
+ *  - maxed:    кнопка MAX, бар полный (глобальный максимум последней локации).
  *
  * РЕЖИМ ПОКУПКИ (радио сверху выноски, аналог Qt RadioButton):
  *  - 'one'  — каждое действие покупает ровно 1 уровень;
@@ -336,7 +338,7 @@ export class ObjectSheet {
 
   open(): void {
     this.openState = true;
-    this.refresh(); // мгновенная синхронизация цен после простоя
+    this.refresh(true); // полная синхронизация: цены, капы локации, гейты после простоя
     this.root.classList.add('open');
     this.updateTabActiveState();
   }
@@ -381,7 +383,7 @@ export class ObjectSheet {
     const state = this.game.state;
     const level = def.currentLevel;
     const unlocked = state.isUnlocked(def);
-    const affordable = unlocked && !state.isMaxed(def) && state.canAfford(def);
+    const affordable = unlocked && !state.isMaxed(def) && !state.isLocationCapped(def) && state.canAfford(def);
 
     if (force || card.shownLevel !== level || card.shownUnlocked !== unlocked) {
       card.cachedCost = state.getUpgradeCost(def);
@@ -425,6 +427,10 @@ export class ObjectSheet {
     } else if (state.isMaxed(def)) {
       this.setBarWidth(card, 100);
       card.barLabelEl.textContent = def.tierNames ? `ур. ${level}` : 'MAX';
+    } else if (state.isLocationCapped(def)) {
+      // Кап локации: всё, что можно выжать здесь, выжато — бар полный.
+      this.setBarWidth(card, 100);
+      card.barLabelEl.textContent = `ур. ${level}`;
     } else if (level > 0) {
       // Покупка перепрыгнула границу грейда (в 'tier' — всегда, т.к. пачка режется
       // по концу грейда) → сначала доливаем до 100%, только потом сбрасываем.
@@ -492,6 +498,15 @@ export class ObjectSheet {
 
     if (state.isMaxed(def)) {
       this.setBuyText(card, 'MAX', force);
+      card.buyBtn.disabled = true;
+      return;
+    }
+
+    if (state.isLocationCapped(def)) {
+      this.setBuyText(card, '🔒', force);
+      card.buyBtn.title = this.game.state.canAdvanceLocation()
+        ? 'Вкачано! Открой кольцо слева и переходить на следующую локацию'
+        : 'Максимум текущей локации — сначала прокачай остальные объекты';
       card.buyBtn.disabled = true;
       return;
     }

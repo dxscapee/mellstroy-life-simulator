@@ -10,7 +10,7 @@
     "startupKeys": ["world/0", "character/0", "house/0"]
   },
   "groups": {
-    "world": { "label": "Фон", "w": 1120, "h": 759, "stages": 6, "maxScale": 2 },
+    "world": { "label": "Фон", "w": 1120, "h": 759, "stages": 5, "maxScale": 2 },
     "yard": { "label": "Двор", "w": 1080, "h": 912, "stages": 3, "maxScale": 2 },
     "house": { "label": "Дом", "w": 384, "h": 640, "stages": 4, "maxScale": 2 },
     "car": { "label": "Машина", "w": 352, "h": 240, "stages": 3, "maxScale": 2 },

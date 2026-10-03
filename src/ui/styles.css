@@ -367,15 +367,16 @@ button.sub-cell {
   background: linear-gradient(90deg, #ff5a4e, #ffb0a4);
 }
 
-/* ================= ПОПАП-ГАЛЕРЕЯ ЭПОХ (карусель) ================= */
+/* ================= ПОПАП ЛОКАЦИЙ (карусель) ================= */
 
-/* Открывается кликом по кольцу прогресса (чипа эпохи в HUD больше нет).
+/* Открывается кликом по кольцу прогресса.
    ОКНО ПО ЦЕНТРУ ЭКРАНА (ТЗ владельца 2026-10-02: раньше висело над нижней
-   панелью). Одна страница = одна эпоха: превью + общая нижняя строка;
+   панелью). Одна страница = одна локация (Гомель … Кипр): превью + общая
+   нижняя строка со статусом и кнопкой «Перейти» при 100% прокачки
    листается стрелками по краям кадра и точками-индикатором снизу. */
 
 /* Тот же паттерн «скрыта = не ловит тапы», что у модалки офлайна. */
-.era-pop {
+.loc-pop {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -396,28 +397,28 @@ button.sub-cell {
   z-index: 15;
 }
 
-.era-pop.open {
+.loc-pop.open {
   transform: translate(-50%, -50%) scale(1);
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 }
 
-.era-pop-header {
+.loc-pop-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 13px 16px 9px;
 }
 
-.era-pop-title {
+.loc-pop-title {
   font-size: 16.5px;
   font-weight: 700;
 }
 
 /* ---------- кадр карусели: стрелки / лента страниц ---------- */
 
-.era-viewport {
+.loc-viewport {
   position: relative;
   overflow: hidden;
   margin: 0 12px;
@@ -426,27 +427,27 @@ button.sub-cell {
   background: rgba(0, 0, 0, 0.32);
 }
 
-/* Ширина ленты (N×кадр) и доля страницы задаются из TS: N = число эпох,
+/* Ширина ленты (N×кадр) и доля страницы задаются из TS: N = число локаций,
    дублировать его в CSS не нужно. */
-.era-track {
+.loc-track {
   display: flex;
   transition: transform 0.28s cubic-bezier(0.25, 0.8, 0.35, 1);
 }
 
-.era-page {
+.loc-page {
   min-width: 0;
 }
 
-/* Превью эпохи: фон эпохи ЦЕЛИКОМ (contain — арт не обрезаем, поля по бокам). */
-.era-media {
+/* Превью локации: её фон ЦЕЛИКОМ (contain — арт не обрезаем, поля по бокам). */
+.loc-media {
   display: block;
   width: 100%;
   height: clamp(170px, 30vh, 300px);
   object-fit: contain;
 }
 
-/* Будущая эпоха: содержимое уровня не показываем — только «?». */
-.era-media-unknown {
+/* Будущая локация: содержимое не показываем — только «?». */
+.loc-media-unknown {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -457,8 +458,8 @@ button.sub-cell {
   text-shadow: 0 4px 18px rgba(0, 0, 0, 0.65);
 }
 
-/* Ассета фона ещё нет — страница не пустует: иконка эпохи + подпись. */
-.era-media-empty {
+/* Ассета фона ещё нет — страница не пустует: иконка локации + подпись. */
+.loc-media-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -468,17 +469,17 @@ button.sub-cell {
   color: var(--text-dim);
 }
 
-.era-media-empty-icon {
+.loc-media-empty-icon {
   font-size: 42px;
   opacity: 0.7;
 }
 
-.era-media-empty-text {
+.loc-media-empty-text {
   font-size: 12px;
 }
 
 /* Стрелки листания — по краям кадра, поверх превью. */
-.era-arrow {
+.loc-arrow {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
@@ -500,19 +501,19 @@ button.sub-cell {
   z-index: 2;
 }
 
-.era-arrow-prev { left: 6px; }
-.era-arrow-next { right: 6px; }
+.loc-arrow-prev { left: 6px; }
+.loc-arrow-next { right: 6px; }
 
-.era-arrow:active { transform: translateY(-50%) scale(0.94); }
+.loc-arrow:active { transform: translateY(-50%) scale(0.94); }
 
-.era-arrow:disabled {
+.loc-arrow:disabled {
   opacity: 0.3;
   cursor: default;
 }
 
 /* Точки-индикатор: сколько всего страниц и где игрок; клик = прыжок на страницу.
    Хит-зона 18px, видимый кружок 10px (толщина прозрачной рамки). */
-.era-dots {
+.loc-dots {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -520,7 +521,7 @@ button.sub-cell {
   padding: 10px 0 0;
 }
 
-.era-dot {
+.loc-dot {
   width: 18px;
   height: 18px;
   padding: 0;
@@ -531,23 +532,23 @@ button.sub-cell {
   cursor: pointer;
 }
 
-.era-dot.active {
+.loc-dot.active {
   background: var(--accent);
   background-clip: padding-box;
   cursor: default;
 }
 
-/* ---------- нижняя строка просматриваемой эпохи ---------- */
+/* ---------- нижняя строка просматриваемой локации ---------- */
 
-.era-strip {
+.loc-strip {
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  grid-template-columns: 34px 1fr auto auto;
   gap: 10px;
   align-items: center;
   padding: 10px 16px 14px;
 }
 
-.era-strip-icon {
+.loc-strip-icon {
   width: 34px;
   height: 34px;
   display: flex;
@@ -558,14 +559,14 @@ button.sub-cell {
   border-radius: 9px;
 }
 
-.era-strip-body {
+.loc-strip-body {
   display: flex;
   flex-direction: column;
   gap: 3px;
   min-width: 0;
 }
 
-.era-strip-name {
+.loc-strip-name {
   font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
@@ -573,7 +574,7 @@ button.sub-cell {
   text-overflow: ellipsis;
 }
 
-.era-strip-sub {
+.loc-strip-sub {
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -581,14 +582,14 @@ button.sub-cell {
   text-overflow: ellipsis;
 }
 
-.era-strip-side {
+.loc-strip-side {
   font-size: 12px;
   font-weight: 700;
   color: var(--accent);
   white-space: nowrap;
 }
 
-.era-bar {
+.loc-bar {
   height: 5px;
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.1);
@@ -596,11 +597,38 @@ button.sub-cell {
   margin-top: 2px;
 }
 
-.era-bar-fill {
+.loc-bar-fill {
   height: 100%;
   width: 0%;
   border-radius: 3px;
   background: linear-gradient(90deg, #2ecc71, #a3e435);
+}
+
+/* Кнопка перехода на следующую локацию: видна только на текущей странице
+   при 100% прокачки. Первый тап — подтверждение (.armed), второй — переход. */
+.loc-go {
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0b0e12;
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.12s ease-out, filter 0.12s ease-out;
+}
+
+.loc-go:active { transform: scale(0.95); }
+
+.loc-go.armed {
+  background: #ffb020;
+  animation: loc-go-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes loc-go-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
 }
 
 /* ================= ВКЛАДКИ ================= */

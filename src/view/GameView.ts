@@ -9,7 +9,7 @@ import {
 } from 'pixi.js';
 import type { SceneObjectInfo } from '@data/objects';
 import type { AssetGroup } from '@data/assets';
-import { SCENE_GROUPS, WORLD_ASSET_GROUP } from '@data/assets';
+import { SCENE_GROUPS, WORLD_ASSET_GROUP, assetKey } from '@data/assets';
 import { WorldLayer } from './WorldLayer';
 import type { AssetRegistry } from './assetRegistry';
 
@@ -234,7 +234,7 @@ export class GameView {
   /** Отписка от «ассет догрузился» (ставится в init, снимается в destroy). */
   private offAssets: (() => void) | null = null;
   /** Запрошенная эпоха фона (-1 — ещё не применяли) для пере-синхронизации. */
-  private lastWorldEra = -1;
+  private lastLocation = -1;
   /** Ключ ассета, который сейчас на фоне (null — заглушка). */
   private appliedWorldKey: string | null = null;
   /**
@@ -564,17 +564,18 @@ export class GameView {
   }
 
   /**
-   * Применить эпоху мира (смена раз в 2 периода; зовёт main при 'world:changed'
-   * и один раз на старте). Фон подменяется текстурой world/<эпоха>: пока новая
-   * грузится — на экране текущая текстура или заглушка; после подмены прошлый
-   * фон освобождается (если это BG-видео, это живой видеодекодер).
+   * Применить ФОН ЛОКАЦИИ (зовёт main при 'location:changed' и один раз на
+   * старте). Ключ — ТОЧНЫЙ world/<index> локации: без отката стадий вниз,
+   * чужой фон не подмазываем (нет ассета — заглушка). Пока новая текстура
+   * грузится — на экране текущая или заглушка; после подмены прошлый фон
+   * освобождается (если это BG-видео, это живой видеодекодер).
    */
-  applyWorldStage(era: number): void {
-    this.lastWorldEra = era;
+  applyLocation(location: number): void {
+    this.lastLocation = location;
 
-    const key = this.assets.resolveKey(WORLD_ASSET_GROUP, era);
-    if (!key) {
-      // Ассетов фона нет вовсе — возвращаем заглушку.
+    const key = assetKey(WORLD_ASSET_GROUP, location);
+    if (!this.assets.has(key)) {
+      // Ассета фона локации нет — возвращаем заглушку.
       if (this.appliedWorldKey) {
         this.assets.release(this.appliedWorldKey);
         this.appliedWorldKey = null;
@@ -611,8 +612,8 @@ export class GameView {
     for (const [container, rec] of this.visuals) {
       if (container.visible) this.syncVisual(rec);
     }
-    // До первого applyWorldStage эпоха неизвестна — фон не трогаем.
-    if (this.lastWorldEra >= 0) this.applyWorldStage(this.lastWorldEra);
+    // До первого applyLocation локация неизвестна — фон не трогаем.
+    if (this.lastLocation >= 0) this.applyLocation(this.lastLocation);
   }
 
   /** Запомнить запрошенную стадию узла и сразу попробовать подменить текстуру. */

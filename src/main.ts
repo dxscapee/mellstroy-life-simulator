@@ -7,6 +7,7 @@ import { yandexService } from '@services/yandex';
 import { buildSceneState } from '@data/objects';
 import {
   assetGroupOf,
+  assetKey,
   CHARACTER_ASSET_GROUP,
   CHARACTER_ASSET_STAGE,
   WORLD_ASSET_GROUP,
@@ -24,10 +25,11 @@ let game: Game | null = null;
 let scene: GameView | null = null;
 
 /**
- * Ключи стартового набора: фон текущей эпохи, тело игрока и текстуры всех
- * купленных сценовых объектов на их текущих стадиях. Ключи резолвятся реестром
- * (с откатом вниз), поэтому грузим ИМЕННО то, что будет показано. Это
- * происходит до LoadingAPI.ready() (загрузочный экран); остальное — лениво.
+ * Ключи стартового набора: фон ТЕКУЩЕЙ ЛОКАЦИИ (world/<index>, только точный
+ * ключ — чужой фон не подмазываем), тело игрока и текстуры всех купленных
+ * сценовых объектов на их текущих стадиях. Ключи резолвятся реестром (с откатом
+ * вниз), поэтому грузим ИМЕННО то, что будет показано. Это происходит до
+ * LoadingAPI.ready() (загрузочный экран); остальное — лениво.
  */
 function startupAssetKeys(assets: AssetRegistry): string[] {
   if (!game) return [];
@@ -36,8 +38,8 @@ function startupAssetKeys(assets: AssetRegistry): string[] {
   const characterKey = assets.resolveKey(CHARACTER_ASSET_GROUP, CHARACTER_ASSET_STAGE);
   if (characterKey) keys.push(characterKey);
 
-  const worldKey = assets.resolveKey(WORLD_ASSET_GROUP, game.worldWatch.stage.era);
-  if (worldKey) keys.push(worldKey);
+  const worldKey = assetKey(WORLD_ASSET_GROUP, game.state.location);
+  if (assets.has(worldKey)) keys.push(worldKey);
 
   for (const state of buildSceneState()) {
     if (!state.owned) continue;
@@ -78,14 +80,14 @@ async function bootstrap(): Promise<void> {
   // Массовые изменения (applyLevels из дебага, загрузка сейва) — сцена перечитывает всё.
   events.on('objects:changed', refreshScene);
 
-  // Мир: стадии применяются и на старте, и при смене периода (фон).
-  view.applyWorldStage(game.worldWatch.stage.era);
-  events.on('world:changed', ({ era }) => view.applyWorldStage(era));
+  // Локация: фон применяется и на старте, и при переходе (событие location:changed).
+  view.applyLocation(game.state.location);
+  events.on('location:changed', ({ location }) => view.applyLocation(location));
 
-  // 4) Слой UI. Превью эпох для галереи: URL фона из манифеста (ui про view не знает).
-  const ui = new UIManager(uiRoot, game, (era) => {
-    const key = assets.resolveKey(WORLD_ASSET_GROUP, era);
-    const entry = key ? assets.entry(key) : null;
+  // 4) Слой UI. Превью локаций для попапа: URL фона из манифеста (ui про view не знает).
+  const ui = new UIManager(uiRoot, game, (location) => {
+    const key = assetKey(WORLD_ASSET_GROUP, location);
+    const entry = assets.has(key) ? assets.entry(key) : null;
     return entry ? { url: entry.url, kind: entry.type } : null;
   });
 

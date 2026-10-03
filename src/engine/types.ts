@@ -55,6 +55,7 @@ export interface ObjectDef {
 /**
  * Сериализуемый снимок состояния (формат v2 — экономика P/A-потоков).
  * subscribers опционален: сейвы v2 до введения подписчиков валидны без него.
+ * location опционален: сейвы до введения локаций мигрируют по среднему уровню.
  */
 export interface GameStateSnapshot {
   version: 2;
@@ -64,6 +65,8 @@ export interface GameStateSnapshot {
   /** id -> уровень (сохраняются только уровни > 0). */
   objects: Record<string, number>;
   subscribers?: SubscriberState;
+  /** Индекс текущей локации (data/locations.ts). undefined — старый сейв. */
+  location?: number;
   savedAt: number;
 }
 
@@ -108,6 +111,6 @@ export type GameEventMap = {
   'subscribers:ready': undefined;
   /** Уровни объектов изменены массово (applyLevels/загрузка сейва) — сцене надо перечитать всё. */
   'objects:changed': undefined;
-  /** Период мира сменился (порог по totalEarned): фон/растительность + чип эпохи. */
-  'world:changed': { period: number; era: number };
+  /** Игрок перешёл на другую локацию (или сброс): фон сцены + подпись кольца. */
+  'location:changed': { location: number };
 };

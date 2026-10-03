@@ -32,7 +32,7 @@ export interface SceneGroupSpec {
   readonly h: number;
   /**
    * Сколько стадий у группы: для объектов — число тиров (tierNames),
-   * для фона — число эпох (WORLD_PERIODS / 2).
+   * для фона — число локаций (LOCATIONS.length, data/locations.ts).
    */
   readonly stages: number;
   /**
@@ -64,10 +64,10 @@ export const OBJECT_ASSET_GROUP: Partial<Record<ObjectId, AssetGroup>> = {
 /** Группа ассета для объекта сцены (null — объект не рисуется). */
 export const assetGroupOf = (id: ObjectId): AssetGroup | null => OBJECT_ASSET_GROUP[id] ?? null;
 
-/** Ключ ассета в манифесте: «группа/стадия» (например, world/3 — фон 3-й эпохи). */
+/** Ключ ассета в манифесте: «группа/стадия» (например, world/3 — фон локации №4). */
 export const assetKey = (group: AssetGroup, stage: number): string => `${group}/${stage}`;
 
-/** Группа фона: ключ эпохи — assetKey(WORLD_ASSET_GROUP, era). */
+/** Группа фона: ключ локации — assetKey(WORLD_ASSET_GROUP, locationIndex). */
 export const WORLD_ASSET_GROUP: AssetGroup = 'world';
 
 /** Группа постоянного тела игрока (без стадий). */
