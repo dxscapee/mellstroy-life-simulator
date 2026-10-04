@@ -85,7 +85,8 @@ export class WorldLayer {
     const color = BG_COLOR[this.scene];
 
     this.placeholder.clear();
-    this.placeholder.rect(-w / 2, -h / 2, w, h).fill({ color, alpha: 0.55 });
+    // Без заливки (владелец 2026-10-05): фона без текстуры (комната) хватало
+    // на то, чтобы залить ЭКРАН коричневым — нужно «как на улице», тонкая рамка.
     this.placeholder.rect(-w / 2, -h / 2, w, h).stroke({ width: 3, color });
 
     this.outline.clear();
@@ -95,7 +96,7 @@ export class WorldLayer {
   /**
    * ЕДИНОЕ правило видимости слоёв фона: в обычной игре — только текстура
    * (нет ассета — тёмный градиент, без рамок); в режиме разметки — или
-   * прямоугольник-заглушка (нет текстуры), или обводка поверх текстуры.
+   * КОНТУР бокса (нет текстуры, без заливки), или обводка поверх текстуры.
    */
   private applyVisibility(): void {
     this.sprite.visible = this.textured;
