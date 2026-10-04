@@ -15,9 +15,14 @@ import type { SceneKind } from '@data/assets';
  * world/0 = 1.475 совпадает с ним).
  *
  * Текстуру ставит GameView.applySceneBackground по манифесту (setTexture(null) —
- * вернуть заглушку). Слою безразлично, картинка это или видео: и то и другое
+ * фон снимается). Слою безразлично, картинка это или видео: и то и другое
  * приходит сюда как Texture. Ключи фона: world/<локация> (улица) и
  * world_home/<локация> (квартира).
+ *
+ * СЛУЖЕБНАЯ ГРАФИКА — только в РЕЖИМЕ РАЗМЕТКИ (setOverlay, кнопка подписей
+ * в дебаг-панели): прямоугольник-заглушка, если текстуры нет, или обводка
+ * области фона поверх текстуры. По умолчанию выкл: игра показывает только
+ * реальную картинку, без «прямоугольников-помощников» (владелец 2026-10-05).
  *
  * Заглушка знает про СЦЕНУ: у улицы и квартиры разные размеры бокса и цвета
  * (синий/тёплый), поэтому setScene(scene) перенастраивает прямоугольник и
@@ -44,10 +49,16 @@ export class WorldLayer {
   readonly root = new Container();
   /** Контейнер-якорь: ставится в центр экрана, зумится cover-скейлом. */
   private holder = new Container();
-  /** Прямоугольник-заглушка (до появления ассета). */
+  /** Прямоугольник-заглушка (виден только в режиме разметки и без текстуры). */
   private placeholder = new Graphics();
   /** Спрайт текстуры фона (картинка или видео). */
   private sprite = new Sprite();
+  /** Обводка области фона — только в режиме разметки и только поверх текстуры. */
+  private outline = new Graphics();
+  /** Режим разметки: служебные рамки показываются (кнопка дебаг-панели). */
+  private overlay = false;
+  /** Стоит ли текстура (false — фон снят: в обычной игре — чистый градиент). */
+  private textured = false;
 
   /** Размер текущего контента: эталон сцены или фактическая текстура. */
   private contentW = WORLD_REF_W;
@@ -60,15 +71,15 @@ export class WorldLayer {
 
   constructor() {
     this.sprite.anchor.set(0.5);
-    this.sprite.visible = false;
 
-    this.holder.addChild(this.placeholder, this.sprite);
+    this.holder.addChild(this.placeholder, this.sprite, this.outline);
     this.root.addChild(this.holder);
 
     this.drawPlaceholder();
+    this.applyVisibility();
   }
 
-  /** Перерисовать прямоугольник заглушки под текущую сцену (бокс + цвет). */
+  /** Перерисовать служебные рамки фона под текущую сцену (бокс + цвет). */
   private drawPlaceholder(): void {
     const { w, h } = bgBox(this.scene);
     const color = BG_COLOR[this.scene];
@@ -76,6 +87,26 @@ export class WorldLayer {
     this.placeholder.clear();
     this.placeholder.rect(-w / 2, -h / 2, w, h).fill({ color, alpha: 0.55 });
     this.placeholder.rect(-w / 2, -h / 2, w, h).stroke({ width: 3, color });
+
+    this.outline.clear();
+    this.outline.rect(-w / 2, -h / 2, w, h).stroke({ width: 3, color });
+  }
+
+  /**
+   * ЕДИНОЕ правило видимости слоёв фона: в обычной игре — только текстура
+   * (нет ассета — тёмный градиент, без рамок); в режиме разметки — или
+   * прямоугольник-заглушка (нет текстуры), или обводка поверх текстуры.
+   */
+  private applyVisibility(): void {
+    this.sprite.visible = this.textured;
+    this.placeholder.visible = this.overlay && !this.textured;
+    this.outline.visible = this.overlay && this.textured;
+  }
+
+  /** Включить/выключить режим разметки (кнопка дебаг-панели «Подписи объектов»). */
+  setOverlay(visible: boolean): void {
+    this.overlay = visible;
+    this.applyVisibility();
   }
 
   /**
@@ -87,7 +118,7 @@ export class WorldLayer {
     if (this.scene === scene) return;
     this.scene = scene;
     this.drawPlaceholder();
-    if (!this.sprite.visible) {
+    if (!this.textured) {
       const box = bgBox(scene);
       this.contentW = box.w;
       this.contentH = box.h;
@@ -104,24 +135,23 @@ export class WorldLayer {
   }
 
   /**
-   * Подменить текстуру фона (null — вернуть заглушку). Сам по себе слой
-   * ничего не грузит и не освобождает: владелец текстур — AssetRegistry.
+   * Подменить текстуру фона (null — снять фон). Сам по себе слой ничего не
+   * грузит и не освобождает: владелец текстур — AssetRegistry.
    */
   setTexture(texture: Texture | null): void {
     if (texture) {
       this.sprite.texture = texture;
       this.contentW = texture.width || WORLD_REF_W;
       this.contentH = texture.height || WORLD_REF_H;
-      this.sprite.visible = true;
-      this.placeholder.visible = false;
+      this.textured = true;
     } else {
       const box = bgBox(this.scene);
       this.sprite.texture = Texture.EMPTY;
       this.contentW = box.w;
       this.contentH = box.h;
-      this.sprite.visible = false;
-      this.placeholder.visible = true;
+      this.textured = false;
     }
+    this.applyVisibility();
     this.layout(this.screenW, this.screenH);
   }
 

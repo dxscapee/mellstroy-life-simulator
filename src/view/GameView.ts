@@ -50,8 +50,14 @@ interface FloatText {
  * Все объекты — ПРЯМОУГОЛЬНИКИ-ЗАГЛУШКИ с номером и размером в px. Размеры и
  * позиции истинные — визуальных правок геометрии нет. Когда в манифесте есть
  * ассет (см. @data/assets и ASSETS.md), заглушка ПОДМЕНЯЕТСЯ спрайтом той же
- * геометрии: стадия — по тиру, фон — по локации; загрузка ленивая, ключи резолвит
- * AssetRegistry. Раскладка о текстурах не знает и не меняется вообще.
+ * геометрии: стадия — по тиру, фон — по локации; загрузка ленивая + ПРЕДЗАГРУЗКА
+ * следующей стадии (переход тира — мгновенный), ключи резолвит AssetRegistry.
+ * Раскладка о текстурах не знает и не меняется вообще.
+ *
+ * ЗАГЛУШКИ И ОБВОДКИ — только в РЕЖИМЕ РАЗМЕТКИ (setObjectLabels, кнопка
+ * дебаг-панели, по умолчанию ВЫКЛ): тогда под текстуру показывается обводка,
+ * а где текстуры нет — прямоугольник-заглушка с подписью. В обычной игре —
+ * только настоящие текстуры (владелец 2026-10-05).
  *
  * СЦЕНЫ (улица / дом): объекты сцены живут в ДВУХ корневых контейнерах —
  * streetRoot (фон улицы, двор, дом, машина) и homeRoot (рабочее место), — а
@@ -97,15 +103,20 @@ interface RectSpec {
 }
 
 /**
- * Узел сцены: прямоугольник-заглушка (gfx + метка) и спрайт текстуры.
+ * Узел сцены: прямоугольник-заглушка (gfx + метка), спрайт текстуры и обводка
+ * области текстуры (outline).
  * stage — ЗАПРОШЕННАЯ стадия (её ставит applySceneState/конструктор); -1 =
  * стадия ещё не известна (до первого applySceneState ничего не грузим, иначе
  * сцена угадывала бы нулевую стадию и тянула лишний ассет).
- * appliedKey — ключ ассета, который сейчас реально показан (null — заглушка).
+ * appliedKey — ключ ассета, который сейчас реально показан (null — текстуры нет).
+ * Видимость всех четырёх слоёв решает ОДИН метод — syncVisualVisibility
+ * (режим разметки из дебаг-панели, см. setObjectLabels).
  */
 interface RectVisual {
   spec: RectSpec;
   gfx: Graphics;
+  /** Обводка области текстуры — видна только в режиме разметки (поверх спрайта). */
+  outline: Graphics;
   label: Text;
   sprite: Sprite;
   stage: number;
@@ -263,18 +274,23 @@ export class GameView {
   /** Запрошенная локация фона (-1 — ещё не применяли) для пере-синхронизации. */
   private lastLocation = -1;
   /**
-   * Ключ фона, удерживаемый ЗА КАЖДУЮ сцену (мы владельцы этих ассетов и
-   * отпускаем их только при смене ЛОКАЦИИ). Держим оба фона текущей локации:
-   * переключение сцены мговенное и не перезапускает видео-декодер. Максимум
-   * два живых фона — в пределах бюджетта (ASSETS.md §4.3, 1–2 видео).
+   * Ключи фонов, удерживаемых ЗА КАЖДУЮ сцену (мы владельцы этих ассетов и
+   * отпускаем их только при смене ЛОКАЦИИ). Обычно в списке один ключ — фон
+   * текущей локации сцены. Держим оба фона текущей локации: переключение сцены
+   * мгновенное и не перезапускает видео-декодер. Максимум
+   * два живых фона — в пределах бюджета (ASSETS.md §4.3, 1–2 видео).
+   * Список (а не одно поле) — чтобы бывший фон НЕ ТЕРЯЛСЯ: раньше ссылка на
+   * него затиралась новым ключом, и фон висел в памяти навсегда (фикс 2026-10-05).
    */
-  private readonly heldWorldKey: Record<SceneKind, string | null> = { street: null, home: null };
+  private readonly heldWorldKeys: Record<SceneKind, string[]> = { street: [], home: [] };
   /** Ключ, который РЕАЛЬНО стоит на слое фона (null — заглушка). */
   private displayedWorldKey: string | null = null;
   /**
-   * Принудительный показ подписей ВСЕХ объектов (номер · имя · размер) —
-   * дебаг-фича из панели (кнопка «Подписи объектов»). По умолчанию ВЫКЛ:
-   * подписи живут только на заглушках, т.е. там, где текстуры ещё нет.
+   * РЕЖИМ РАЗМЕТКИ СЦЕНЫ — дебаг-фича из панели (кнопка «Подписи объектов»),
+   * по умолчанию ВЫКЛ. ВЫКЛ: на экране только реальные текстуры — ни
+   * «прямоугольников-помощников», ни подписей (владелец 2026-10-05). ВКЛ: у всех
+   * объектов видна область под текстуру (обводка поверх картинки или заглушка)
+   * плюс подписи — сверять габариты рисунка с боксом сцены.
    */
   private labelsForced = false;
 
@@ -373,9 +389,14 @@ export class GameView {
   private buildRect(spec: RectSpec): Container {
     const c = new Container();
 
+    // ПРЯМОУГОЛЬНИК-ПОМОЩНИК (заливка + контур): виден ТОЛЬКО в режиме разметки
+    // и только пока текстуры нет — в обычной игре подсказка о габаритах на
+    // экране не нужна (владелец 2026-10-05: «пока кнопка выключена — вообще не
+    // видно прямоугольника-помощника»). Показывает его syncVisualVisibility.
     const g = new Graphics();
     g.rect(-spec.w / 2, -spec.h / 2, spec.w, spec.h).fill({ color: spec.color, alpha: 0.55 });
     g.rect(-spec.w / 2, -spec.h / 2, spec.w, spec.h).stroke({ width: 3, color: spec.color });
+    g.visible = false;
     c.addChild(g);
 
     // Спрайт подменяемой текстуры: та же геометрия, что у заглушки, —
@@ -384,6 +405,13 @@ export class GameView {
     sprite.anchor.set(0.5);
     sprite.visible = false;
     c.addChild(sprite);
+
+    // ОБВОДКА ОБЛАСТИ ТЕКСТУРЫ — поверх спрайта и только в режиме разметки:
+    // «даже если объект прокачан, видно, куда должна попасть текстура».
+    const outline = new Graphics();
+    outline.rect(-spec.w / 2, -spec.h / 2, spec.w, spec.h).stroke({ width: 3, color: spec.color });
+    outline.visible = false;
+    c.addChild(outline);
 
     // Метка: номер из чертежа + название + размер текстуры в px.
     // Центр-верх прямоугольника: метка видна, даже когда края объекта
@@ -395,10 +423,10 @@ export class GameView {
     });
     mark.anchor.set(0.5, 1);
     mark.position.set(0, Math.round(-spec.h / 2) - 6 - (spec.lift ?? 0));
-    // Видимость — строго по флагу показа подписей (по умолчанию ВЫКЛ).
+    // Видимость — строго по режиму разметки (по умолчанию ВЫКЛ).
     mark.visible = this.labelsForced;
     c.addChild(mark);
-    this.visuals.set(c, { spec, gfx: g, label: mark, sprite, stage: -1, appliedKey: null });
+    this.visuals.set(c, { spec, gfx: g, outline, label: mark, sprite, stage: -1, appliedKey: null });
 
     return c;
   }
@@ -672,8 +700,11 @@ export class GameView {
    * при переключении сцены и один раз на старте). Ключ — ТОЧНЫЙ
    * <группа фона сцены>/<индекс локации> (world/2 — улица, world_home/2 —
    * квартира): без отката стадий вниз, чужой фон не подмазываем (нет ассета —
-   * заглушка). Пока новая текстура грузится — на экране текущая или заглушка;
-   * после подмены прошлый фон освобождается (BG-видео — живой видеодекодер).
+   * фон снимается; прямоугольник-заглушка живёт только в режиме разметки).
+   * Пока новая текстура грузится — на экране прежний фон.
+   * Фоны ДЕРЖИМ по одной штуке на сцену (обе сцены готовы к мгновенному
+   * переключению), а всё, что больше не нужно ни одной сцене (фон прошлой
+   * локации, у видео — живой декодер), ОСВОБОЖДАЕМ в syncHeldWorlds.
    */
   applySceneBackground(location: number): void {
     this.lastLocation = location;
@@ -685,8 +716,10 @@ export class GameView {
     const scene = this.currentScene;
     const key = assetKey(backgroundGroup(scene), location);
 
-    // 1) ЧТО ПОКАЗЫВАЕМ. Ассета нет — заглушка; ассет грузится — на экране
-    // остаётся прежний фон (появившийся позже позовёт onLoaded → refreshTextures).
+    // 1) ЧТО ПОКАЗЫВАЕМ. Ассета нет — фон снимается (в обычной игре это чистый
+    // градиент, прямоугольник-помощник живёт только в режиме разметки); ассет
+    // грузится — на экране остаётся прежний фон (появившийся позже позовёт
+    // onLoaded → refreshTextures).
     if (!this.assets.has(key)) {
       if (this.displayedWorldKey !== null) {
         this.world.setTexture(null);
@@ -698,37 +731,53 @@ export class GameView {
         this.world.setTexture(texture);
         this.displayedWorldKey = key;
       }
-      if (this.displayedWorldKey === key) this.heldWorldKey[scene] = key;
+      // Держим фон этой сцены СРАЗУ, ещё до прихода текстуры: вернувшись из
+      // другой сцены, игрок не должен ждать сеть (release его не тронет —
+      // ключ равен «нужному» для сцены).
+      if (!this.heldWorldKeys[scene].includes(key)) this.heldWorldKeys[scene].push(key);
     }
 
-    // 2) ОТПУСКАЕМ фон чужой локации (у видео это закрытие декодера), НО только
-    // тот, что НЕ стоит сейчас на экране: destroy текстуры под работающим
-    // спрайтом = чёрный/битый кадр. Висящий на экране отпустит следующий заход
-    // (после подмены фоном новой локации или заглушкой). Фон ДРУГОЙ СЦЕНЫ
-    // текущей локации остаётся: возврат в сцену не тянет и не декодит его заново.
-    for (const heldScene of SCENE_ORDER) {
-      const held = this.heldWorldKey[heldScene];
-      if (!held) continue;
-      if (held === assetKey(backgroundGroup(heldScene), location)) continue;
-      if (held === this.displayedWorldKey) continue;
-      this.assets.release(held);
-      this.heldWorldKey[heldScene] = null;
+    // 2) ОТПУСКАЕМ всё, что больше не нужно НИ ОДНОЙ сцене: фон чужой локации
+    // (у видео это закрытие декодера). Текущий фон сцены и текстуру, стоящую на
+    // экране прямо сейчас, не трогаем — destroy под работающим спрайтом = битый кадр.
+    this.syncHeldWorlds(location);
+  }
+
+  /**
+   * Освободить фоны, у которых нет будущего: у каждой сцены остаётся ключ
+   * ТЕКУЩЕЙ локации (включая только что заказанный и ещё грузящийся), всё
+   * прочее — из списка вон (у видео закрывается декодер).
+   */
+  private syncHeldWorlds(location: number): void {
+    for (const scene of SCENE_ORDER) {
+      const wanted = assetKey(backgroundGroup(scene), location);
+      const held = this.heldWorldKeys[scene];
+      for (let i = held.length - 1; i >= 0; i--) {
+        const key = held[i];
+        if (key === wanted || key === this.displayedWorldKey) continue;
+        held.splice(i, 1);
+        this.assets.release(key);
+      }
     }
   }
 
   // ---------------------------------------------------------------- текстуры
 
   /**
-   * Показать/скрыть ПОДПИСИ ОБЪЕКТОВ (номер · имя · размер) — ДЕБАГ-ФИЧА
-   * (кнопка в дебаг-панели; из консоли — scene.setObjectLabels(true)).
-   * ВЫКЛ (по умолчанию): подписи скрыты У ВСЕХ — и на заглушках, и поверх
-   * текстур. ВКЛ: подписи ВСЕХ объектов + метка фона.
-   * Рамки-заглушки (gfx) не трогаем: под текстурой они не нужны.
+   * Режим РАЗМЕТКИ СЦЕНЫ: подписи «номер · имя · размер» + область под текстуру
+   * у ВСЕХ объектов — ДЕБАГ-ФИЧА (кнопка в дебаг-панели; из консоли —
+   * scene.setObjectLabels(true)).
+   * ВЫКЛ (по умолчанию): на экране только реальные текстуры — ни подписей, ни
+   * «прямоугольников-помощников», даже там, где текстуры нет (владелец 2026-10-05).
+   * ВКЛ: подписи ВСЕХ объектов + обводка поверх прокачанного объекта (видно,
+   * куда встала текстура) + прямоугольник-заглушка там, где текстуры нет,
+   * + метка и рамка фона.
    */
   setObjectLabels(visible: boolean): void {
     this.labelsForced = visible;
-    for (const rec of this.visuals.values()) this.syncLabelVisibility(rec);
+    for (const rec of this.visuals.values()) this.syncVisualVisibility(rec);
     if (this.worldLabel) this.worldLabel.visible = visible;
+    this.world.setOverlay(visible);
   }
 
   /** Пере-синхронизация всех видимых узлов и фона после догрузки ассетов. */
@@ -751,47 +800,66 @@ export class GameView {
 
   /**
    * Подмена заглушки текстурой: ключ резолвится с откатом вниз (нет файла
-   * стадии N — берётся ближайшая младшая). Ассета нет вовсе — остаётся
-   * заглушка. Ассет есть, но ещё грузится — ничего не трогаем: по завершении
-   * onLoaded позовёт refreshTextures.
+   * стадии N — берётся ближайшая младшая). Ассета нет вовсе — текстуры нет
+   * (в обычной игре узел просто пустой). Ассет есть, но ещё грузится — ничего
+   * не трогаем: по завершении onLoaded позовёт refreshTextures.
    */
   private syncVisual(rec: RectVisual): void {
     if (rec.stage < 0) return; // стадия ещё не задана состоянием сцены
     // Группа ассета — из СЦЕНЫ, в которой объект живёт (id → группа этой сцены).
     const group = assetGroupOf(rec.spec.id, this.currentScene) ?? rec.spec.group;
+    // Следующая стадия — заранее в кэш: эволюция не ждёт сеть (см. prefetchNextStage).
+    this.prefetchNextStage(group, rec.stage);
+
     const key = this.assets.resolveKey(group, rec.stage);
     if (!key) {
-      if (rec.appliedKey) this.showPlaceholder(rec);
+      if (rec.appliedKey !== null) {
+        rec.appliedKey = null;
+        this.syncVisualVisibility(rec);
+      }
       return;
     }
 
     const texture = this.assets.texture(key);
-    if (!texture || rec.appliedKey === key) return;
+    if (!texture) return;
+    // Уже стоит — выходим, НО: сравнение по объекту текстуры ловит пере-загрузку
+    // (release + повторная загрузка того же ключа даёт новую Texture) — иначе
+    // спрайт остался бы с уничтоженной текстурой (чёрный/пустой кадр).
+    if (rec.appliedKey === key && rec.sprite.texture === texture) return;
 
     rec.sprite.texture = texture;
     // Размер спрайта ставится КАЖДЫЙ раз: у текстур разного разрешения своя
     // натуральная величина, width/height нормируют её в истинный бокс сцены.
     rec.sprite.width = rec.spec.w;
     rec.sprite.height = rec.spec.h;
-    rec.sprite.visible = true;
-    rec.gfx.visible = false;
     rec.appliedKey = key;
-    this.syncLabelVisibility(rec);
-  }
-
-  /** Вернуть узел к прямоугольнику-заглушке (ассет исчез из манифеста). */
-  private showPlaceholder(rec: RectVisual): void {
-    rec.sprite.visible = false;
-    rec.gfx.visible = true;
-    rec.appliedKey = null;
-    this.syncLabelVisibility(rec);
+    this.syncVisualVisibility(rec);
   }
 
   /**
-   * Единое правило видимости подписи узла: подписи видны ТОЛЬКО при
-   * включённом показе из дебаг-панели (labelsForced, по умолчанию ВЫКЛ).
+   * Тихая догрузка СЛЕДУЮЩЕЙ стадии группы (слой объекта растёт по тирам:
+   * 30 уровней = новая текстура). Так переход тира мгновенный: файл уже в кэше,
+   * а не тянется из сети с прошлой картинкой на экране (баг владельца 2026-10-05).
+   * Только ТОЧНЫЙ ключ стадии: нет файла — ничего не грузим (откат вниз не нужен).
    */
-  private syncLabelVisibility(rec: RectVisual): void {
+  private prefetchNextStage(group: AssetGroup, stage: number): void {
+    const nextKey = assetKey(group, stage + 1);
+    if (this.assets.has(nextKey)) this.assets.prefetch(nextKey);
+  }
+
+  /**
+   * ЕДИНОЕ правило видимости слоёв узла (заглушка / спрайт / обводка / подпись).
+   * Режим разметки (labelsForced, кнопка в дебаг-панели):
+   *  · ВЫКЛ (по умолчанию) — только РЕАЛЬНАЯ текстура: «прямоугольников-помощников»
+   *    и подписей на экране нет вообще;
+   *  · ВКЛ — обводка области текстуры поверх спрайта, а где текстуры нет —
+   *    прямоугольник-заглушка; плюс подпись «номер · имя · размер».
+   */
+  private syncVisualVisibility(rec: RectVisual): void {
+    const textured = rec.appliedKey !== null;
+    rec.sprite.visible = textured;
+    rec.gfx.visible = this.labelsForced && !textured;
+    rec.outline.visible = this.labelsForced && textured;
     rec.label.visible = this.labelsForced;
   }
 
@@ -810,12 +878,11 @@ export class GameView {
 
   // ------------------------------------------------------------ тиры сцены
 
-  // ------------------------------------------------------------ тиры сцены
-
   /**
-   * Применить визуальное состояние сцены по уровням объектов.
-   * Плейсхолдеры — прямоугольники: тиры пока НИЧЕГО не меняют визуально
-   * (перекраски-тинты убраны до текстур). Меняется только владение (visible).
+   * Применить визуальное состояние сцены по уровням объектов: владение →
+   * visible узла, тир → стадия текстуры (setStage → syncVisual). Загрузка
+   * ленивая, поэтому новая стадия может прийти на пару кадров позже — на
+   * экране до этого остаётся прежняя картинка (не подмена на заглушку).
    */
   applySceneState(states: SceneObjectInfo[]): void {
     this.lastStates = states;
