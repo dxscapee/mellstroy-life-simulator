@@ -7,7 +7,7 @@ export type ObjectGroup = 'property' | 'outfit' | 'workplace' | 'skills';
  * Режим покупки в магазине (радио сверху выноски, выбор пользователя):
  *  - 'one'  — строго один уровень за действие;
  *  - 'tier' — максимум доступного на текущие деньги, но НЕ дальше конца
- *             текущего грейда (tiers.levelsPerTier): прогресс-бар обнуляется.
+ *             текущего грейда (tiers.levelsPerTier): бар доливается и стартует новый.
  */
 export type BuyMode = 'one' | 'tier';
 
@@ -15,8 +15,8 @@ export type BuyMode = 'one' | 'tier';
 export type ObjectId =
   | 'house' | 'car' | 'bg'
   | 'watch' | 'hair' | 'clothes'
-  | 'tech' | 'pc' | 'furniture'
-  | 'charisma' | 'emotion' | 'humor';
+  | 'camera' | 'furniture' | 'pc'
+  | 'charisma' | 'intellect' | 'humor' | 'emotion';
 
 /**
  * Прокачиваемый объект. Статические данные задаёт data/objects.ts;
@@ -31,7 +31,7 @@ export interface ObjectDef {
   readonly startLevel: 0 | 1;
   /** Цена уровня 1. Для startLevel: 0 это и есть цена «покупки» объекта. */
   readonly costBase: Decimal;
-  /** Множитель цены за каждый следующий уровень. */
+  /** Множитель цены за каждый следующий уровень (значение берётся из gameConfig.pricing). */
   readonly costGrowth: number;
   /** Вклад уровня в АКТИВНЫЙ поток: +aWeight×100% к базе тапа. */
   readonly aWeight: number;
@@ -42,7 +42,11 @@ export interface ObjectDef {
   readonly desc: string;
   /** Объект нельзя купить, пока у этого объекта уровень 0 (гейт веток). */
   readonly requires?: ObjectId;
-  /** Названия визуальных стадий (index = tier); показывается в карточке. */
+  /**
+   * Названия визуальных стадий (index = tier). В карточке НЕ показываются
+   * (имена объектов статичны, 2026-10-03) — массив нужен ТОЛЬКО как число
+   * стадий сцены (tierOf/assetKey) и чтобы объект считался сценовым.
+   */
   readonly tierNames?: readonly string[];
   /** Текущий уровень (runtime). НЕ задавать вручную вне GameState. */
   currentLevel: number;
@@ -51,6 +55,7 @@ export interface ObjectDef {
 /**
  * Сериализуемый снимок состояния (формат v2 — экономика P/A-потоков).
  * subscribers опционален: сейвы v2 до введения подписчиков валидны без него.
+ * location опционален: сейвы до введения локаций мигрируют по среднему уровню.
  */
 export interface GameStateSnapshot {
   version: 2;
@@ -60,6 +65,8 @@ export interface GameStateSnapshot {
   /** id -> уровень (сохраняются только уровни > 0). */
   objects: Record<string, number>;
   subscribers?: SubscriberState;
+  /** Индекс текущей локации (data/locations.ts). undefined — старый сейв. */
+  location?: number;
   savedAt: number;
 }
 
@@ -104,6 +111,12 @@ export type GameEventMap = {
   'subscribers:ready': undefined;
   /** Уровни объектов изменены массово (applyLevels/загрузка сейва) — сцене надо перечитать всё. */
   'objects:changed': undefined;
-  /** Период мира сменился (порог по totalEarned): фон/растительность + чип эпохи. */
-  'world:changed': { period: number; era: number };
+  /** Игрок перешёл на другую локацию (или сброс): фон сцены + подпись кольца. */
+  'location:changed': { location: number };
+  /**
+   * Игрок перешёл в другую СЦЕНУ (улица ↔ дом). Прокачка общая — меняется
+   * только видимый набор объектов и фон (см. view/GameView.setScene).
+   * Живёт в сессии: в сейв сцена не пишется (старт всегда с улицы).
+   */
+  'scene:changed': { scene: string };
 };

@@ -1,5 +1,6 @@
 import Decimal from 'break_infinity.js';
 import { gameConfig } from '@data/gameConfig';
+import { LOCATIONS, getLocation } from '@data/locations';
 import { objectById, objectDefs } from '@data/objects';
 import { events } from './eventBus';
 import type { BuyMode, GameStateSnapshot, ObjectDef, OfflineEarnings, SubscriberState } from './types';
@@ -25,6 +26,13 @@ export class GameState {
   /** Мета-прогресс подписчиков (см. gameConfig.subscribers). */
   subscribers: SubscriberState;
 
+  /**
+   * Индекс текущей локации (индекс в LOCATIONS, см. data/locations.ts).
+   * Капом ЭТОЙ локации ограничена прокачка объектов; переход дальше —
+   * только при 100% прокачки (advanceLocation). Сидется в снапшот.
+   */
+  location: number;
+
   /** Кэш активного потока (доход за тап): пересобирается после изменения уровней. */
   private cachedMoneyPerTap: Decimal | null = null;
   /**
@@ -39,6 +47,7 @@ export class GameState {
     this.totalEarned = new Decimal(0);
     this.tapsCount = 0;
     this.subscribers = { count: 0, progress: 0, claimed: 0, claimable: false, goal: 0 };
+    this.location = 0;
   }
 
   // -------------------------------------------------------------- objects
@@ -62,6 +71,55 @@ export class GameState {
     return this.getLevel(def.requires) > 0;
   }
 
+  // ------------------------------------------------------------- локации
+
+  /** Определение текущей локации (name/icon/start/cap/base). */
+  get locationDef() {
+    return getLocation(this.location);
+  }
+
+  /** Максимальный уровень объекта НА ТЕКУЩЕЙ ЛОКАЦИИ (гейт прогресса). */
+  getLevelCap(): number {
+    return this.locationDef.cap;
+  }
+
+  /** Объект упёрся в кап текущей локации — дальше не качается до перехода. */
+  isLocationCapped(def: ObjectDef): boolean {
+    return def.currentLevel >= this.getLevelCap();
+  }
+
+  /** Средний уровень всех объектов — душа прогресса локации. */
+  averageLevel(): number {
+    let sum = 0;
+    for (const o of objectDefs) sum += o.currentLevel;
+    return sum / objectDefs.length;
+  }
+
+  /**
+   * Прогресс текущей локации 0..1 от ПРОКАЧКИ (не от денег):
+   * 0 — ничего не накачано, 1 — все объекты на капе локации.
+   * Считается на примитивах, аллокаций нет (зовётся из тика кольца).
+   */
+  locationProgress(): number {
+    const loc = this.locationDef;
+    const span = loc.cap - loc.base;
+    if (span <= 0) return 1;
+    const frac = (this.averageLevel() - loc.base) / span;
+    return frac <= 0 ? 0 : frac >= 1 ? 1 : frac;
+  }
+
+  /** Можно ли переходить дальше: прокачка локации 100% и это не финал. */
+  canAdvanceLocation(): boolean {
+    return this.location < LOCATIONS.length - 1 && this.locationProgress() >= 1;
+  }
+
+  /** Перейти на следующую локацию. false — нельзя (не вкачано или финал). */
+  advanceLocation(): boolean {
+    if (!this.canAdvanceLocation()) return false;
+    this.location += 1;
+    return true;
+  }
+
   /** Стоимость следующего уровня: costBase * costGrowth^level. */
   getUpgradeCost(def: ObjectDef): Decimal {
     return def.costBase.mul(Math.pow(def.costGrowth, def.currentLevel));
@@ -81,27 +139,30 @@ export class GameState {
    * mode:
    *  - 'one'  — всегда ровно один уровень;
    *  - 'tier' — максимум того, что влезает в деньги, но не дальше КОНЦА текущего
-   *             грейда (levelsPerTier), чтобы прогресс-бар обнулился.
-   * count ≤ 0 (нельзя/не куплено/не хватает денег) — тогда cost = цена СЛЕДУЮЩЕГО
-   * уровня: UI показывает её на кнопке выключенной покупки.
+   *             грейда (levelsPerTier) и не дальше КАПА локации — прогресс-бар
+   *             доливается, новый грейд/уровень уже закрыт.
+   * count ≤ 0 (нельзя/не куплено/кап локации/не хватает денег) — тогда cost = цена
+   * СЛЕДУЮЩЕГО уровня: UI показывает её на кнопке выключенной покупки.
    */
   getBuyPlan(def: ObjectDef, mode: BuyMode): { count: number; cost: Decimal } {
     const next = this.getUpgradeCost(def);
-    if (this.isMaxed(def) || !this.isUnlocked(def) || this.money.lt(next)) {
+    // Кап прокачки: не выше ни дефа (глобальный), ни капа текущей локации.
+    const cap = Math.min(def.maxLevel, this.getLevelCap());
+    if (this.isMaxed(def) || !this.isUnlocked(def) || def.currentLevel >= cap || this.money.lt(next)) {
       return { count: 0, cost: next };
     }
 
     // Грейд — каждые levelsPerTier уровней. Уровень 0 (объект не куплен) считаем
-    // НАЧАЛОМ грейда: «до конца грейда» = perTier уровней (10, 20, 30…), а не 0.
+    // НАЧАЛОМ грейда: «до конца грейда» = perTier уровней, а не 0.
     const perTier = gameConfig.tiers.levelsPerTier;
     const toTierEnd = perTier - (def.currentLevel % perTier);
-    const cap = mode === 'one'
+    const budget = mode === 'one'
       ? 1
-      : Math.min(toTierEnd, def.maxLevel - def.currentLevel);
+      : Math.min(toTierEnd, cap - def.currentLevel);
 
     let count = 1;
     let cost = next;
-    while (count < cap) {
+    while (count < budget) {
       // Цена уровня (currentLevel + count) — тот же закон, что у getUpgradeCost.
       const step = def.costBase.mul(Math.pow(def.costGrowth, def.currentLevel + count));
       const total = cost.add(step);
@@ -296,6 +357,7 @@ export class GameState {
     this.tapsCount = 0;
     this.tapOverride = null; // свежий старт = без форсов
     this.subscribers = { count: 0, progress: 0, claimed: 0, claimable: false, goal: 0 };
+    this.location = 0; // сброс — назад в Гомель
     for (const o of objectDefs) o.currentLevel = o.startLevel;
     this.invalidateCaches();
     events.emit('objects:changed', undefined); // сцена должна скрыть проданное
@@ -314,6 +376,7 @@ export class GameState {
       tapsCount: this.tapsCount,
       objects,
       subscribers: { ...this.subscribers },
+      location: this.location,
       savedAt: Date.now(),
     };
   }
@@ -337,8 +400,10 @@ export class GameState {
     for (const o of objectDefs) o.currentLevel = o.startLevel;
     if (snap.objects) {
       for (const [rawId, level] of Object.entries(snap.objects)) {
-        // Миграция id: «Лицо» переименовано в «Причёску» — прогресс переносится.
-        const id = rawId === 'face' ? 'hair' : rawId;
+        // Миграции id (прогресс переносится): «Лицо» → «Причёска»; микрофон
+        // (tech) → камера (camera, решение владельца 2026-10-03). Старые гейты
+        // (навыки → pc → tech) гарантируют, что камера в сейве уже была куплена.
+        const id = rawId === 'face' ? 'hair' : rawId === 'tech' ? 'camera' : rawId;
         const def = objectById.get(id as ObjectDef['id']);
         if (def && Number.isFinite(level) && level > 0) {
           def.currentLevel = Math.min(Math.floor(level), def.maxLevel);
@@ -346,9 +411,34 @@ export class GameState {
       }
     }
 
+    // Локация: поле в сейве есть — верим ему; нет (сейв до локаций) — выводим
+    // из среднего уровня. Уровни выше капа подрезаем — старый сейв мог быть
+    // накачан дальше (был глобальный maxLevel без локаций).
+    const stored = snap.location;
+    this.location = typeof stored === 'number' && Number.isFinite(stored)
+      ? Math.max(0, Math.min(LOCATIONS.length - 1, Math.floor(stored)))
+      : this.deriveLocationFromLevel(this.averageLevel());
+    const cap = this.getLevelCap();
+    for (const o of objectDefs) {
+      if (o.currentLevel > cap) o.currentLevel = cap;
+    }
+
     // Потоки пересчитываем из дефов, а не верим сейву — защита от рассинхрона.
     this.invalidateCaches();
     events.emit('objects:changed', undefined); // сцена должна перечитать owned/тиры
+  }
+
+  /**
+   * Локация по среднему уровню — миграция сейвов, созданных ДО введения локаций:
+   * уровень уже выше 89 → сразу подходящая локация, прогресс не теряется.
+   */
+  private deriveLocationFromLevel(avg: number): number {
+    let index = 0;
+    for (let i = 1; i < LOCATIONS.length; i++) {
+      if (avg >= LOCATIONS[i].base) index = i;
+      else break;
+    }
+    return index;
   }
 
   /**

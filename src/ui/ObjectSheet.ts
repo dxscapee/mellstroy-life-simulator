@@ -16,10 +16,16 @@ const HOLD_FREE_REPEATS = 12;
 const HOLD_REPEAT_FAST_MS = 70;
 /** Пересчёт цены пачки (режим 'tier') — не чаще, чем раз в N тиков: Decimal не бесплатен. */
 const TIER_PLAN_THROTTLE_TICKS = 15;
+/**
+ * Длительность «доливки» бара до 100% при завершении грейда (мс). Чуть больше
+ * CSS-перехода .progress-fill (width 0.25s): после него бар сбрасывается в новый
+ * грейд. См. playTierFill.
+ */
+const TIER_FILL_MS = 260;
 
 interface CardRefs {
   root: HTMLElement;
-  /** Имя объекта: на уровне 0 — название, после покупки — стадия тира («Ноут», «Супер-ПК»). */
+  /** Имя объекта: СТАТИЧНО, обобщённое (не меняется от прокачки). */
   nameEl: HTMLElement;
   /** Прогресс-бар эволюции: заполнение + подпись «ур. 7». */
   barFillEl: HTMLElement;
@@ -36,17 +42,20 @@ interface CardRefs {
   shownBuyText: string;
   /** Цена следующего уровня — зависит только от уровня, пересчитывается при его смене. */
   cachedCost: Decimal;
+  /** Таймер «рейса» бара: доливка до 100% → сброс в новый грейд (см. playTierFill). */
+  fillTimer: number | null;
 }
 
 /**
  * Выноска объектов по группам-вкладкам. DOM строится один раз из data/objects.ts,
  * дальше обновляются только динамические части.
  *
- * Схема карточки (по ТЗ): [иконка] [имя/стадия] [бар] [нижняя строка: ур. N + вклад] [кнопка].
- * Имя объекта после покупки заменяется НАЗВАНИЕМ СТАДИИ тира («Ноут» → «Монитор»);
- * уровень живёт в подписи под баром, рядом — ОБЩИЙ вклад объекта в доход
- * (не дельта следующего уровня). Каждые tiers.levelsPerTier покупок объект
- * ЭВОЛЮЦИОНИРУЕТ: новая моделька на сцене и название стадии.
+ * Схема карточки (по ТЗ): [иконка] [имя] [бар] [нижняя строка: ур. N + вклад] [кнопка].
+ * Имя объекта СТАТИЧНО и обобщённо (владелец 2026-10-03): НЕ меняется от
+ * прокачки — «Недвижимость», «Транспорт», «Камера»… Уровень живёт в подписи
+ * под баром, рядом — ОБЩИЙ вклад объекта в доход (не дельта следующего уровня).
+ * Каждые tiers.levelsPerTier покупок объект ЭВОЛЮЦИОНИРУЕТ визуально: новая
+ * текстура-стадия на сцене (уровень по-прежнему задаёт tier через tierNames).
  *
  * Окно — отдельная выноска над таб-баром (НЕ его продолжение), по центру,
  * фиксированной ширины (не растягивается на широких экранах).
@@ -56,12 +65,16 @@ interface CardRefs {
  *  - locked:   гейт `requires` не пройден — кнопка 🔒, условие в подписи бара;
  *  - level 0:  кнопка = цена первой покупки, бар пустой;
  *  - owned:    бар = level % levelsPerTier, кнопка = цена следующего уровня;
- *  - maxed:    кнопка MAX, бар полный.
+ *  - loc-cap:  объект на КАПЕ локации — бар полный, кнопка 🔒 (дальше только
+ *              переход на следующую локацию через кольцо/попап);
+ *  - maxed:    кнопка MAX, бар полный (глобальный максимум последней локации).
  *
  * РЕЖИМ ПОКУПКИ (радио сверху выноски, аналог Qt RadioButton):
  *  - 'one'  — каждое действие покупает ровно 1 уровень;
  *  - 'tier' — действие покупает максимум доступного, но не дальше конца
- *             текущего грейда: прогресс-бар обнуляется, карточка обновляется.
+ *             текущего грейда: прогресс-бар СНАЧАЛА ДОЛИВАЕТСЯ до 100% (грейд
+ *             завершён), затем сбрасывается в начало нового (ТЗ владельца
+ *             2026-10-03; раньше падал в 0 мгновенно).
  * Нажатие на кнопку можно ЗАЖАТЬ: покупки идут серией (пауза → повтор с
  * разгоном), отпускание мгновенно останавливает серию.
  */
@@ -162,9 +175,11 @@ export class ObjectSheet {
     row.setAttribute('role', 'radiogroup');
     row.setAttribute('aria-label', 'Режим покупки');
 
+    // Подписи короткие по ТЗ владельца (2026-10-02): «1 ур.» | «max»;
+    // полные объяснения режима остаются в title (hint) у кнопок.
     const items: { mode: BuyMode; label: string; hint: string }[] = [
-      { mode: 'one', label: 'ПО 1 УРОВНЮ', hint: 'Одно нажатие — один уровень' },
-      { mode: 'tier', label: 'НА ВСЕ ДЕНЬГИ', hint: 'Сразу до конца грейда — бар обнуляется' },
+      { mode: 'one', label: '1 ур.', hint: 'Одно нажатие — один уровень' },
+      { mode: 'tier', label: 'max', hint: 'Сразу до конца грейда: бар доливается и стартует новый' },
     ];
 
     for (const item of items) {
@@ -206,6 +221,7 @@ export class ObjectSheet {
   private rebuildCards(): void {
     this.stopHold(); // серия не должна переживать смену вкладки
     this.holdFired = false; // карточки старые — лишний click гасить некому
+    for (const card of this.cards) this.clearFillTimer(card); // снимаем висящие таймеры бара
     this.listEl.replaceChildren();
     this.cards = [];
 
@@ -291,7 +307,7 @@ export class ObjectSheet {
     const card: CardRefs = {
       root, nameEl: name, barFillEl: barFill, barLabelEl: barLabel, incomeEl: income, buyBtn, def,
       shownLevel: -1, shownAffordable: false, shownUnlocked: true, shownBuyText: '',
-      cachedCost: this.game.state.getUpgradeCost(def),
+      cachedCost: this.game.state.getUpgradeCost(def), fillTimer: null,
     };
     this.refreshCard(card, true, true);
     return card;
@@ -322,7 +338,7 @@ export class ObjectSheet {
 
   open(): void {
     this.openState = true;
-    this.refresh(); // мгновенная синхронизация цен после простоя
+    this.refresh(true); // полная синхронизация: цены, капы локации, гейты после простоя
     this.root.classList.add('open');
     this.updateTabActiveState();
   }
@@ -367,7 +383,7 @@ export class ObjectSheet {
     const state = this.game.state;
     const level = def.currentLevel;
     const unlocked = state.isUnlocked(def);
-    const affordable = unlocked && !state.isMaxed(def) && state.canAfford(def);
+    const affordable = unlocked && !state.isMaxed(def) && !state.isLocationCapped(def) && state.canAfford(def);
 
     if (force || card.shownLevel !== level || card.shownUnlocked !== unlocked) {
       card.cachedCost = state.getUpgradeCost(def);
@@ -396,9 +412,8 @@ export class ObjectSheet {
     const state = this.game.state;
     const perTier = gameConfig.tiers.levelsPerTier;
 
-    // Имя = стадия тира (только у купленного объекта); не куплен/заблокирован — название.
-    const stage = level > 0 ? def.tierNames?.[Math.floor(level / perTier)] : undefined;
-    card.nameEl.textContent = stage ?? def.name;
+    // Имя СТАТИЧНО — обобщённое название, не зависит от прокачки (владелец 2026-10-03).
+    card.nameEl.textContent = def.name;
 
     // Формируем текст об ОБЩЕМ вкладе объекта в доходы
     const incomeInfo = this.getIncomeInfo(def);
@@ -407,22 +422,69 @@ export class ObjectSheet {
     card.incomeEl.textContent = unlocked ? incomeInfo : '';
 
     if (!unlocked && def.requires) {
-      card.barFillEl.style.width = '0%';
+      this.setBarWidth(card, 0);
       card.barLabelEl.textContent = `Нужен: ${getObject(def.requires).name}`;
     } else if (state.isMaxed(def)) {
-      card.barFillEl.style.width = '100%';
+      this.setBarWidth(card, 100);
       card.barLabelEl.textContent = def.tierNames ? `ур. ${level}` : 'MAX';
+    } else if (state.isLocationCapped(def)) {
+      // Кап локации: всё, что можно выжать здесь, выжато — бар полный.
+      this.setBarWidth(card, 100);
+      card.barLabelEl.textContent = `ур. ${level}`;
     } else if (level > 0) {
-      const inTier = level % perTier;
-      card.barFillEl.style.width = `${(inTier / perTier) * 100}%`;
+      // Покупка перепрыгнула границу грейда (в 'tier' — всегда, т.к. пачка режется
+      // по концу грейда) → сначала доливаем до 100%, только потом сбрасываем.
+      const percent = ((level % perTier) / perTier) * 100;
+      const crossedTier =
+        card.shownLevel >= 0 &&
+        Math.floor(level / perTier) > Math.floor(card.shownLevel / perTier);
+      if (crossedTier) this.playTierFill(card, percent);
+      else this.setBarWidth(card, percent);
       card.barLabelEl.textContent = `ур. ${level}`;
     } else {
-      card.barFillEl.style.width = '0%';
+      this.setBarWidth(card, 0);
       card.barLabelEl.textContent = 'Не куплено';
     }
 
     // ---------- кнопка ----------
     this.updateBuyButton(card, true);
+  }
+
+  /**
+   * Обычный путь бара: ширина ставится сразу (ширину анимирует CSS-transition
+   * .progress-fill). Любой висящий таймер «доливки» гасится — он был бы устаревшим.
+   */
+  private setBarWidth(card: CardRefs, percent: number): void {
+    this.clearFillTimer(card);
+    card.barFillEl.style.width = `${percent}%`;
+  }
+
+  /**
+   * Грейд завершён: бар СНАЧАЛА доливается до 100% (видно, что эволюция достигнута),
+   * и только после завершения перехода сбрасывается в начало нового грейда.
+   * Сброс делается БЕЗ анимации (мгновенное заполнение 100% → итог), иначе бар
+   * визуально «оттекал» бы назад через всю шкалу. Таймер живёт на карточке и
+   * перебивается следующей покупкой/перерисовкой (clearFillTimer).
+   */
+  private playTierFill(card: CardRefs, finalPercent: number): void {
+    this.clearFillTimer(card);
+    card.barFillEl.style.width = '100%';
+    card.fillTimer = globalThis.setTimeout(() => {
+      card.fillTimer = null;
+      card.barFillEl.style.transition = 'none';
+      card.barFillEl.style.width = '0%';
+      void card.barFillEl.offsetWidth; // форсируем reflow: 'none' должен примениться до возврата
+      card.barFillEl.style.transition = '';
+      card.barFillEl.style.width = `${finalPercent}%`;
+    }, TIER_FILL_MS);
+  }
+
+  /** Снять висящий таймер «доливки» карточки (смена уровня/вкладки/режима). */
+  private clearFillTimer(card: CardRefs): void {
+    if (card.fillTimer !== null) {
+      globalThis.clearTimeout(card.fillTimer);
+      card.fillTimer = null;
+    }
   }
 
   /**
@@ -436,6 +498,15 @@ export class ObjectSheet {
 
     if (state.isMaxed(def)) {
       this.setBuyText(card, 'MAX', force);
+      card.buyBtn.disabled = true;
+      return;
+    }
+
+    if (state.isLocationCapped(def)) {
+      this.setBuyText(card, '🔒', force);
+      card.buyBtn.title = this.game.state.canAdvanceLocation()
+        ? 'Вкачано! Открой кольцо слева и переходить на следующую локацию'
+        : 'Максимум текущей локации — сначала прокачай остальные объекты';
       card.buyBtn.disabled = true;
       return;
     }

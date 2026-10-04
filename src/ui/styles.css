@@ -60,27 +60,42 @@ html, body, #app {
   pointer-events: auto; /* интерактив перехватывает клики */
 }
 
-/* ================= Кольцо прогресса мира (слева сверху) ================= */
+/* ================= Кольцо прогресса мира + локация (слева сверху) ================= */
 
 /*
- * Круглая кнопка-шкала: тёмная «таблетка» в стиле плашек HUD, дорожка на весь
- * круг и градиентная дуга прогресса поверх неё; процент — по центру.
- * ПРИКРЕПЛЕНА К ЛЕВОМУ КРАЮ БЛОКА ПЛАШЕК (right: 100% + 10px) — при ресайзе
+ * Круглая кнопка-шкала: тёмная «таблетка» из тех же материалов, что плашки HUD
+ * (var(--bg-panel) + рамка 8%), дорожка на весь круг и сплошная зелёная дуга
+ * (акцент) поверх неё; процент — по центру.
+ * ПРИКРЕПЛЕНА К ЛЕВОМУ КРАЮ БЛОКА ПЛАШЕК (right: 100% + --ring-gap) — при ресайзе
  * окна она едет вместе с меню и не расходится с ним к краю экрана.
  * Клик — галерея эпох (та же функция, что раньше была у чипа эпохи в HUD).
+ *
+ * РАЗМЕР — ПО СВОБОДНОМУ МЕСТУ (ТЗ владельца 2026-10-02): панель сдвинута вправо
+ * (--hud-shift), слева освободилась полоса, и кольцо занимает её целиком, пока
+ * не упрётся в --ring-max. Формула сама подстраивается под ширину окна, отдельных
+ * медиа-значений размера кольца больше нет (было 72px / 52px на узком порте).
  */
 .world-ring {
+  /* Свободная полоса слева от блока = пол-экрана + сдвиг − пол-блока;
+     минус зазор до блока и отступ от края экрана — это и есть диаметр кольца.
+     Единицы абсолютные (vw/px), поэтому --ring-size годится и для шрифта, и для SVG. */
+  --ring-size: clamp(
+    52px,
+    calc(50vw + var(--hud-shift) - var(--bar-w) / 2 - var(--ring-gap) - var(--ring-margin)),
+    var(--ring-max)
+  );
   position: absolute;
   top: calc(8px + env(safe-area-inset-top));
-  right: calc(100% + 10px);
-  width: 72px;
-  height: 72px;
+  right: calc(100% + var(--ring-gap));
+  width: var(--ring-size);
+  height: var(--ring-size);
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* Материалы плашек HUD (.hud-cell): фон var(--bg-panel) + рамка 8% — без
+     зелёного радиального оттенка, внутренней подсветки и «уличной» тени. */
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 34%, rgba(46, 204, 113, 0.18), rgba(16, 20, 24, 0.86) 70%);
+  background: var(--bg-panel);
   backdrop-filter: blur(8px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
   cursor: pointer;
   z-index: 12;
   transition: transform 0.14s ease, box-shadow 0.2s ease;
@@ -92,7 +107,9 @@ html, body, #app {
 
 .world-ring-svg {
   position: absolute;
-  inset: 6px;
+  /* Отступ дуги от края — доля размера кольца (6px при 72px), а не фикс: SVG
+     тянется вместе с --ring-size, толщина обводки задана в единицах viewBox. */
+  inset: 8.3%;
   width: auto;
   height: auto;
   /* Старт дуги сверху, как в мокапе владельца. */
@@ -108,11 +125,10 @@ html, body, #app {
 
 .world-ring-fg {
   fill: none;
-  /* Градиент задаётся в SVG (UIManager) один раз. */
-  stroke: url(#world-ring-gradient);
+  /* Сплошной акцентный зелёный — как у других элементов интерфейса. */
+  stroke: var(--accent);
   stroke-width: 6.5;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 4px rgba(163, 228, 53, 0.5));
   /* Обводка рисуется по длине окружности; offset = остаток.
      Точная длина (dasharray/dashoffset) подставляется из TS inline-стилем. */
   transition: stroke-dashoffset 0.35s cubic-bezier(0.25, 0.8, 0.35, 1);
@@ -124,11 +140,43 @@ html, body, #app {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15.5px;
+  /* 0.215 от диаметра = прежние 15.5px при кольце 72px. */
+  font-size: calc(var(--ring-size) * 0.215);
   font-weight: 800;
   letter-spacing: -0.3px;
-  color: #eaf7ef;
+  color: var(--text);
   text-shadow: 0 1px 5px rgba(0, 0, 0, 0.75);
+  pointer-events: none;
+}
+
+/*
+ * НАЗВАНИЕ ЛОКАЦИИ (эпоха мира) — под кольцом, внутри самой кнопки: клик по
+ * подписи так же открывает галерею эпох, а не уходит тапом в сцену.
+ * ЦЕНТРИРОВАНИЕ ПОД КОЛЬЦОМ: бокс сдвинут влево на ПОЛОВИНУ зазора
+ * (left: calc(--ring-gap / -2)), ширина = диаметр + зазор — тогда центр бокса
+ * совпадает с центром кольца и text-align:center ставит текст ровно под ним
+ * (без сдвига left:0 текст уходил вправо на gap/2 = 5px — центр бокса
+ * «кольцо+зазор» ≠ центр кольца).
+ * Ширина = диаметр кольца + зазор до блока — это вся свободная полоса слева:
+ * за компоновку верхней панели подпись не выходит (самые длинные имена
+ * «Мегаструктура»/«Предместье» влезают целиком, более длинное — многоточие).
+ */
+.world-label {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: calc(var(--ring-gap) / -2);
+  width: calc(100% + var(--ring-gap));
+  text-align: center;
+  font-size: calc(var(--ring-size) * 0.135);
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text-dim);
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Подпись — НЕ интерактив (инвариант 4): тапы сквозь неё уходят в сцену,
+     как у плашек HUD. Кольцо над ней кликабельно, как и раньше. */
   pointer-events: none;
 }
 
@@ -139,64 +187,46 @@ html, body, #app {
 
 @keyframes ring-glow {
   0%, 100% {
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    box-shadow: none;
   }
   40% {
-    box-shadow: 0 0 22px 4px rgba(46, 204, 113, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    box-shadow: 0 0 22px 4px rgba(46, 204, 113, 0.55);
   }
-}
-
-/* ================= Кнопка настроек (справа сверху) ================= */
-
-/* Статичная кнопка-плашка (после дизайна интерфейса сюда лягут графика/звук).
-   ПРИКРЕПЛЕНА К ПРАВОМУ КРАЮ БЛОКА ПЛАШЕК (left: 100% + 10px) — при ресайзе
-   окна едет вместе с меню; размер фиксирован, на узком портрете чуть свисает
-   за край экрана (см. медиа-блок ниже). */
-.settings-btn {
-  position: absolute;
-  top: calc(8px + env(safe-area-inset-top));
-  left: calc(100% + 10px);
-  width: 46px;
-  height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  color: var(--text-dim);
-  background: var(--bg-panel);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  backdrop-filter: blur(8px);
-  cursor: pointer;
-  z-index: 12;
-}
-
-.settings-btn:active {
-  transform: translateY(1px);
 }
 
 /* ================= HUD ================= */
 
 /*
- * ВЕРХНЯЯ ПАНЕЛЬ как ОДНО ЦЕЛОЕ: блок плашек по центру (+ кольцо и настройки,
- * прикреплённые к его краям). Ширина и центрирование — те же, что у нижнего
- * меню (--menu-w, left:50% + translateX(-50%)), поэтому верхние и нижние
- * плашки совпадают по краям и никуда не уезжают при изменении ширины окна.
- * Боковых отступов у сетки нет: крайние плашки вровень с нижней панелью.
+ * ВЕРХНЯЯ ПАНЕЛЬ как ОДНО ЦЕЛОЕ: блок плашек + кольцо прогресса, прикреплённое
+ * к его левому краю. Блок — той же ширины, что нижнее меню, но СДВИНУТ вправо
+ * от центра (--hud-shift, ТЗ владельца 2026-10-02): слева освобождается полоса
+ * под увеличенное кольцо, справа крайние плашки выступают за нижнюю панель.
+ * Боковых отступов у сетки нет: крайние плашки вровень с блоком.
  */
 .hud-bar {
+  /* Сдвиг всей панели (плашки + кольцо) вправо от центра (ТЗ владельца
+     2026-10-02): +24px сверх прежнего отступа кольца от края (6px) — слева
+     освобождается полоса, которую занимает увеличенное кольцо. */
+  --hud-shift: 30px;
+  --ring-gap: 10px;   /* зазор между кольцом и блоком плашек */
+  --ring-margin: 6px; /* отступ кольца от левого края экрана */
+  --ring-max: 96px;   /* потолок: выше кольцо отрывается от композиции панели */
+  /* Ширина блока — как --menu-w у нижнего меню, но в единицах, пригодных для
+     расчёта кольца: 100% внутри calc() кольца считалось бы от ДРУГОГО
+     контейнера (кольцо — абсолютный ребёнок блока), поэтому здесь vw. */
+  --bar-w: min(100vw, 420px);
   position: absolute;
   top: 0;
-  left: 50%;
+  left: calc(50% + var(--hud-shift));
   transform: translateX(-50%);
-  width: var(--menu-w);
+  width: var(--bar-w);
   pointer-events: none; /* плашки — не должны есть тапы по холсту */
 }
 
 /*
  * Сетка плашек БЕЗ ПОДПИСЕЙ (ТЗ владельца 2026-09-30) — компактные ячейки:
  *   [баланс] [пассив] / [новая валюта «soon»] [актив] / [подписчики + бар]
- * Роль подписи: цвет значения (stat-<kind>) и title ячейки.
+ * Роль показателя: значение (все — одного белого цвета) и title ячейки.
  */
 .hud-top {
   display: grid;
@@ -206,29 +236,13 @@ html, body, #app {
   pointer-events: none; /* ячейки денег не должны есть тапы по холсту */
 }
 
-/* Узкие экраны (портрет): HUD сжимается между кольцом (слева) и настройками
-   (справа). Виджеты тоже мельчают. Порог 584px = начало наезда HUD 420px
-   на кольцо 72px при чистом центрировании. */
+/* Узкие экраны (портрет): блок плашек сужается (100% − 124px), значение мельче.
+   Кольцо отдельного размера здесь больше НЕ имеет: --ring-size сам считает
+   свободную полосу от --bar-w, поэтому на узком экране кольцо меньше ровно
+   настолько, насколько уже окно. */
 @media (max-width: 583px) {
-  /* Блок сужается между виджетами — кольцо и настройки висят по его краям,
-     значит автоматически оказываются у краёв экрана (перекрытий нет). */
   .hud-bar {
-    /* Центр доступной полосы [68 .. w-56]: сдвиг +6px, ширина 100%-124px. */
-    left: calc(50% + 6px);
-    width: min(calc(100% - 124px), 420px);
-  }
-
-  .world-ring {
-    width: 52px;
-    height: 52px;
-  }
-
-  .world-ring-svg {
-    inset: 4px;
-  }
-
-  .world-ring-pct {
-    font-size: 11.5px;
+    --bar-w: min(calc(100vw - 124px), 420px);
   }
 
   .cell-value {
@@ -236,18 +250,8 @@ html, body, #app {
   }
 }
 
-/* Мобильное (портретное) соотношение сторон на узком экране: кнопка настроек
-   СТАТИЧНА и остаётся полноразмерной — она отодвигается на 6px дальше от края
-   блока, поэтому совсем немного выходит за край экрана (владелец: «реально
-   чуть-чуть»). На широких экранах места хватает, кнопка целиком внутри. */
-@media (max-aspect-ratio: 1/1) and (max-width: 583px) {
-  .settings-btn {
-    left: calc(100% + 16px);
-  }
-}
-
 /* Ячейка-показатель: только значение (подписей у верхних плашек нет),
-   поэтому плашки компактные — смысл даёт цвет значения. */
+   поэтому плашки компактные; цвет у всех значений ОДИНАКОВЫЙ — белый. */
 .hud-cell {
   background: var(--bg-panel);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -269,14 +273,17 @@ html, body, #app {
   text-overflow: ellipsis;
 }
 
-/* Цветовая маркировка показателей: пассив — зелёный, тап и новая валюта — золотые. */
-.stat-balance .cell-value { color: var(--text); }
-.stat-passive .cell-value { color: var(--accent); }
-.stat-active .cell-value { color: #f4b942; }
+/* Все значения верхнего меню — ОДНОГО БЕЛОГО цвета (ТЗ владельца 2026-10-02):
+   разноцветную маркировку (зелёный пассив, золотые тап/валюта) убрали,
+   роль показателя даёт title ячейки. */
+.stat-balance .cell-value,
+.stat-passive .cell-value,
+.stat-active .cell-value { color: var(--text); }
 
-/* Плашка новой валюты (ещё не введена в игру): приглушённая заглушка «soon». */
+/* Плашка новой валюты (ещё не введена в игру): заглушка «soon» — тоже белая,
+   отличие только в типографике (мельче, капс, разрядка). */
 .stat-gold .cell-value {
-  color: rgba(244, 185, 66, 0.55);
+  color: var(--text);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 1.6px;
@@ -307,6 +314,8 @@ button.sub-cell {
   justify-content: flex-start; /* влево, рядом с иконкой */
   gap: 4px;
   min-width: 0;
+  /* Та же причина, что у .sub-track: у <button> в Chrome свой UA align-items. */
+  align-self: stretch;
 }
 
 .sub-count {
@@ -325,22 +334,14 @@ button.sub-cell {
   min-width: 0;
 }
 
-.sub-cell.claimable .sub-count {
-  color: #f4b942;
-}
-
 .sub-cell.claimable {
   cursor: pointer;
   animation: sub-pulse 1.1s ease-in-out infinite;
 }
 
 @keyframes sub-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(244, 185, 66, 0.0); }
-  50% { box-shadow: 0 0 14px 2px rgba(244, 185, 66, 0.55); }
-}
-
-.sub-cell.claimable .cell-value {
-  color: #f4b942;
+  0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.0); }
+  50% { box-shadow: 0 0 14px 2px rgba(231, 76, 60, 0.55); }
 }
 
 .sub-track {
@@ -348,33 +349,40 @@ button.sub-cell {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.12);
   overflow: hidden;
+  /* ВАЖНО: у <button> в Chrome UA задаёт align-items: flex-start — пустой
+     трек схлопывался в 0 и полоса не рисовалась; stretch возвращает ширину. */
+  align-self: stretch;
 }
 
 .sub-fill {
   height: 100%;
   width: 0%;
   border-radius: 4px;
-  background: linear-gradient(90deg, #f4b942, #ffe08a);
+  /* Заполняющаяся полоса подписчиков — КРАСНАЯ (ТЗ владельца 2026-10-02). */
+  background: linear-gradient(90deg, var(--danger), #ff8b7d);
   transition: width 0.3s ease-out;
 }
 
 .sub-cell.claimable .sub-fill {
-  background: linear-gradient(90deg, #f4b942, #fff3c4);
+  background: linear-gradient(90deg, #ff5a4e, #ffb0a4);
 }
 
-/* ================= ПОПАП-ГАЛЕРЕЯ ЭПОХ ================= */
+/* ================= ПОПАП ЛОКАЦИЙ (карусель) ================= */
 
-/* Открывается кликом по кольцу прогресса (чипа эпохи в HUD больше нет). */
+/* Открывается кликом по кольцу прогресса.
+   ОКНО ПО ЦЕНТРУ ЭКРАНА (ТЗ владельца 2026-10-02: раньше висело над нижней
+   панелью). Одна страница = одна локация (Гомель … Кипр): превью + общая
+   нижняя строка со статусом и кнопкой «Перейти» при 100% прокачки
+   листается стрелками по краям кадра и точками-индикатором снизу. */
 
 /* Тот же паттерн «скрыта = не ловит тапы», что у модалки офлайна. */
-.era-pop {
+.loc-pop {
   position: absolute;
+  top: 50%;
   left: 50%;
-  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px);
-  transform: translateX(-50%) scale(0.96);
-  transform-origin: bottom center;
+  transform: translate(-50%, -50%) scale(0.96);
   width: var(--menu-w);
-  max-height: min(58vh, calc(100vh - var(--tabbar-h) - 150px));
+  max-height: calc(100vh - var(--tabbar-h) - 40px);
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
@@ -389,55 +397,158 @@ button.sub-cell {
   z-index: 15;
 }
 
-.era-pop.open {
-  transform: translateX(-50%) scale(1);
+.loc-pop.open {
+  transform: translate(-50%, -50%) scale(1);
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
 }
 
-.era-pop-header {
+.loc-pop-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 13px 16px 9px;
 }
 
-.era-pop-title {
+.loc-pop-title {
   font-size: 16.5px;
   font-weight: 700;
 }
 
-.era-pop-list {
-  overflow-y: auto;
-  padding: 2px 12px 14px;
+/* ---------- кадр карусели: стрелки / лента страниц ---------- */
+
+.loc-viewport {
+  position: relative;
+  overflow: hidden;
+  margin: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+/* Ширина ленты (N×кадр) и доля страницы задаются из TS: N = число локаций,
+   дублировать его в CSS не нужно. */
+.loc-track {
+  display: flex;
+  transition: transform 0.28s cubic-bezier(0.25, 0.8, 0.35, 1);
+}
+
+.loc-page {
+  min-width: 0;
+}
+
+/* Превью локации: её фон ЦЕЛИКОМ (contain — арт не обрезаем, поля по бокам). */
+.loc-media {
+  display: block;
+  width: 100%;
+  height: clamp(170px, 30vh, 300px);
+  object-fit: contain;
+}
+
+/* Будущая локация: содержимое не показываем — только «?». */
+.loc-media-unknown {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: clamp(170px, 30vh, 300px);
+  font-size: clamp(64px, 15vh, 108px);
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.26);
+  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.65);
+}
+
+/* Ассета фона ещё нет — страница не пустует: иконка локации + подпись. */
+.loc-media-empty {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 8px;
-  -webkit-overflow-scrolling: touch;
+  height: clamp(170px, 30vh, 300px);
+  color: var(--text-dim);
 }
 
-/* Строка эпохи в галерее: иконка / имя + фазы / прогресс или порог. */
-.era-row {
+.loc-media-empty-icon {
+  font-size: 42px;
+  opacity: 0.7;
+}
+
+.loc-media-empty-text {
+  font-size: 12px;
+}
+
+/* Стрелки листания — по краям кадра, поверх превью. */
+.loc-arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 3px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+  background: rgba(12, 16, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  z-index: 2;
+}
+
+.loc-arrow-prev { left: 6px; }
+.loc-arrow-next { right: 6px; }
+
+.loc-arrow:active { transform: translateY(-50%) scale(0.94); }
+
+.loc-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Точки-индикатор: сколько всего страниц и где игрок; клик = прыжок на страницу.
+   Хит-зона 18px, видимый кружок 10px (толщина прозрачной рамки). */
+.loc-dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 0 0;
+}
+
+.loc-dot {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 4px solid transparent;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: padding-box;
+  cursor: pointer;
+}
+
+.loc-dot.active {
+  background: var(--accent);
+  background-clip: padding-box;
+  cursor: default;
+}
+
+/* ---------- нижняя строка просматриваемой локации ---------- */
+
+.loc-strip {
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  grid-template-columns: 34px 1fr auto auto;
   gap: 10px;
   align-items: center;
-  padding: 9px 10px;
-  border-radius: 12px;
-  background: var(--bg-card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 16px 14px;
 }
 
-.era-row.current {
-  border-color: rgba(46, 204, 113, 0.55);
-}
-
-.era-row.future {
-  opacity: 0.5;
-}
-
-.era-row-icon {
+.loc-strip-icon {
   width: 34px;
   height: 34px;
   display: flex;
@@ -448,22 +559,22 @@ button.sub-cell {
   border-radius: 9px;
 }
 
-.era-row-body {
+.loc-strip-body {
   display: flex;
   flex-direction: column;
   gap: 3px;
   min-width: 0;
 }
 
-.era-row-name {
-  font-size: 13.5px;
+.loc-strip-name {
+  font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.era-row-veg {
+.loc-strip-sub {
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -471,18 +582,14 @@ button.sub-cell {
   text-overflow: ellipsis;
 }
 
-.era-row-side {
-  font-size: 11px;
+.loc-strip-side {
+  font-size: 12px;
   font-weight: 700;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-.era-row.current .era-row-side {
   color: var(--accent);
+  white-space: nowrap;
 }
 
-.era-bar {
+.loc-bar {
   height: 5px;
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.1);
@@ -490,11 +597,38 @@ button.sub-cell {
   margin-top: 2px;
 }
 
-.era-bar-fill {
+.loc-bar-fill {
   height: 100%;
   width: 0%;
   border-radius: 3px;
   background: linear-gradient(90deg, #2ecc71, #a3e435);
+}
+
+/* Кнопка перехода на следующую локацию: видна только на текущей странице
+   при 100% прокачки. Первый тап — подтверждение (.armed), второй — переход. */
+.loc-go {
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0b0e12;
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.12s ease-out, filter 0.12s ease-out;
+}
+
+.loc-go:active { transform: scale(0.95); }
+
+.loc-go.armed {
+  background: #ffb020;
+  animation: loc-go-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes loc-go-pulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
 }
 
 /* ================= ВКЛАДКИ ================= */
@@ -544,6 +678,51 @@ button.sub-cell {
   transform: translateY(1px);
 }
 
+/* ================= КНОПКА ПЕРЕХОДА МЕЖДУ СЦЕНАМИ ================= */
+
+/*
+ * Вертикальная пилюля у ПРАВОГО края, над таб-баром (решение владельца
+ * 2026-10-04: кнопка сбоку). Тот же материал, что у плашек HUD (--bg-panel +
+ * рамка 8%), вертикальная раскладка: иконка сверху, подпись снизу —
+ * помещается в узкую полосу сбоку от меню. Подпись — сцена-ЦЕЛЬ перехода.
+ */
+.scene-btn {
+  position: absolute;
+  right: 8px;
+  /* 14px, а не 10px: --tabbar-h — номинальная высота панели, а на узком
+     экране подписи вкладок переносятся и панель выше номинала — с 10px кнопка
+     на 1px залезала на вкладки (замер 375×667). */
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 14px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 12; /* над холстом, рядом с HUD/шторкой */
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  transition: transform 0.14s ease;
+}
+
+.scene-btn .scene-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.scene-btn:active {
+  transform: scale(0.94);
+}
+
 /* ================= ВЫНОСКА ПОКУПОК ================= */
 
 /*
@@ -555,6 +734,10 @@ button.sub-cell {
  */
 .sheet {
   position: absolute;
+  /* 14: выше кнопки сцен (12) и кольца, ниже попапа локаций (15). Открытая
+     выноска накрывает кнопку сцен (на узком экране она во всю ширину) —
+     висящая поверх магазина кнопка была бы лишним интерактивом. */
+  z-index: 14;
   left: 50%;
   bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px); /* зазор над меню (с учётом safe-area реальной высоты панели) */
   transform: translateX(-50%) scale(0.96);
@@ -614,20 +797,23 @@ button.sub-cell {
 
 /* ================= РЕЖИМ ПОКУПКИ (радио над карточками) ================= */
 
+/* Компактные пилюли (ТЗ владельца 2026-10-02, скетч к скрину): НЕ тянутся на
+   пол-ряда (flex: 0 0 auto, слева), только по содержимому — высота строки
+   упала с ~42px до ~31px, подписи короткие «1 ур.» / «max». */
 .sheet-modes {
   display: flex;
-  gap: 8px;
-  padding: 0 16px 10px;
+  gap: 6px;
+  padding: 0 16px 8px;
 }
 
 .mode-btn {
-  flex: 1 1 0;
-  padding: 8px 6px;
+  flex: 0 0 auto;
+  padding: 5px 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 9px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.02em;
   cursor: pointer;

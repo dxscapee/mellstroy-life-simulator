@@ -1,5 +1,6 @@
 import Decimal from 'break_infinity.js';
 import { gameConfig } from '@data/gameConfig';
+import { MAX_LEVEL } from '@data/locations';
 import type { ObjectDef, ObjectGroup, ObjectId } from '@engine/types';
 
 /**
@@ -11,21 +12,29 @@ import type { ObjectDef, ObjectGroup, ObjectId } from '@engine/types';
  *   A = moneyPerTap  * (1 + Σ aWeight * level)  — доход за тап
  *   P = passiveBase  * (1 + Σ pWeight * level)  — доход в секунду
  * Объект со startLevel: 0 даёт вклад 0, пока не куплен (уровень 1+).
+ *
+ * ИМЕНА СТАТИЧНЫ (решение владельца 2026-10-03): `name` не меняется от
+ * прокачки, названия обобщённые («Недвижимость», «Транспорт», «Камера»…).
+ * `tierNames` остались ТОЛЬКО как число визуальных стадий сцены (сколько
+ * текстур рисует владелец) — в карточке они больше не показываются.
  */
 
 // ---------- ЛОКАЛЬНЫЕ ССЫЛКИ (не экспортировать наружу!) ----------
 const $ = (n: number) => new Decimal(n);
 
-/** Визуальные стадии дома: index = тир (каждые TIERS.levelsPerTier уровней). */
+/** Визуальные стадии дома: index = тир. Задают ЧИСЛО стадий текстуры. */
 const HOUSE_STAGES = ['Коробка', 'Комната', 'Квартира', 'Пентхаус'] as const;
 
-// Названия стадий описывают ТОЛЬКО купленный объект (владение = флаг owned):
-// тачка уровней 1–4 — «Велик», 5–9 — «Лада», 10+ — «Ламба».
+/**
+ * Число визуальных стадий для сценовых объектов (в карточке НЕ показываются —
+ * имена статичны). length = сколько текстур-стадий ждёт пайплайн (ASSETS.md).
+ * Объекты без записи здесь на сцене не рисуются (навыки).
+ */
 const TIER_STAGES: Partial<Record<ObjectId, readonly string[]>> = {
   house: HOUSE_STAGES,
   car: ['Велик', 'Лада', 'Ламба'],
   bg: ['Пустырь', 'Асфальт', 'Паркет'],
-  tech: ['Микрофон', 'Студийный', 'Золотой'],
+  camera: ['Камера', 'Профи-камера', 'Студийная'],
   pc: ['Ноут', 'Монитор', 'Супер-ПК'],
   furniture: ['Табурет', 'Кресло', 'Трон'],
   watch: ['Браслет', 'Часы', 'Тайм-золото'],
@@ -36,18 +45,18 @@ const TIER_STAGES: Partial<Record<ObjectId, readonly string[]>> = {
 // ==================== ИМУЩЕСТВО (фон + сцена) ====================
 
 const house: ObjectDef = {
-  id: 'house', name: 'Дом', group: 'property', icon: '🏠',
-  startLevel: 1, costBase: $(75), costGrowth: 1.15,
-  aWeight: 0.05, pWeight: 0.25, maxLevel: 100,
-  desc: 'Твой угл. Основной источник пассива.',
+  id: 'house', name: 'Недвижимость', group: 'property', icon: '🏠',
+  startLevel: 1, costBase: $(75), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.05, pWeight: 0.25, maxLevel: MAX_LEVEL,
+  desc: 'Твой угол. Основной источник пассива.',
   tierNames: HOUSE_STAGES,
   currentLevel: 1,
 };
 
 const car: ObjectDef = {
-  id: 'car', name: 'Тачка', group: 'property', icon: '🚗',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
-  aWeight: 0.06, pWeight: 0.20, maxLevel: 100,
+  id: 'car', name: 'Транспорт', group: 'property', icon: '🚗',
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.06, pWeight: 0.20, maxLevel: MAX_LEVEL,
   desc: 'Возит на съёмки: пассив капает стабильнее.',
   requires: 'house',
   tierNames: TIER_STAGES.car,
@@ -56,20 +65,20 @@ const car: ObjectDef = {
 
 const bg: ObjectDef = {
   id: 'bg', name: 'Двор', group: 'property', icon: '🌆',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
-  aWeight: 0.04, pWeight: 0.18, maxLevel: 100,
-  desc: 'Чем богаче фон, тем больше подписчиков.',
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.04, pWeight: 0.18, maxLevel: MAX_LEVEL,
+  desc: 'Чем богаче двор, тем больше подписчиков.',
   requires: 'house',
   tierNames: TIER_STAGES.bg,
   currentLevel: 0,
 };
 
-// ==================== ШМОТ (пассивный поток) ====================
+// ==================== ОДЕЖДА (пассивный поток) ====================
 
 const watch: ObjectDef = {
   id: 'watch', name: 'Часы', group: 'outfit', icon: '⌚',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
-  aWeight: 0.05, pWeight: 0.20, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.05, pWeight: 0.20, maxLevel: MAX_LEVEL,
   desc: 'Статус на запястье: пассив капает бодрее.',
   requires: 'house',
   tierNames: TIER_STAGES.watch,
@@ -78,8 +87,8 @@ const watch: ObjectDef = {
 
 const hair: ObjectDef = {
   id: 'hair', name: 'Причёска', group: 'outfit', icon: '💇',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
-  aWeight: 0.05, pWeight: 0.18, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.05, pWeight: 0.18, maxLevel: MAX_LEVEL,
   desc: 'Причёска решает: подписчики за стиль.',
   requires: 'house',
   tierNames: TIER_STAGES.hair,
@@ -87,9 +96,9 @@ const hair: ObjectDef = {
 };
 
 const clothes: ObjectDef = {
-  id: 'clothes', name: 'Шмот', group: 'outfit', icon: '👕',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
-  aWeight: 0.04, pWeight: 0.20, maxLevel: 100,
+  id: 'clothes', name: 'Одежда', group: 'outfit', icon: '👕',
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.04, pWeight: 0.20, maxLevel: MAX_LEVEL,
   desc: 'Брендовый лук: подписчики за стиль.',
   requires: 'house',
   tierNames: TIER_STAGES.clothes,
@@ -97,63 +106,77 @@ const clothes: ObjectDef = {
 };
 
 // ==================== РАБОЧЕЕ МЕСТО (активный поток) ====================
+// Порядок покупки = порядок карточек: КАМЕРА → МЕБЕЛЬ → КОМП.
+// Камера — первая и открывает всю ветку (включая навыки).
 
-const tech: ObjectDef = {
-  id: 'tech', name: 'Микрофон', group: 'workplace', icon: '🎙️',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
-  aWeight: 0.25, pWeight: 0.05, maxLevel: 100,
-  desc: 'Голос решает: каждый тап жирнее.',
+const camera: ObjectDef = {
+  id: 'camera', name: 'Камера', group: 'workplace', icon: '📷',
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.25, pWeight: 0.05, maxLevel: MAX_LEVEL,
+  desc: 'Первый шаг к контенту и ключ ко всей ветке.',
   requires: 'house',
-  tierNames: TIER_STAGES.tech,
-  currentLevel: 0,
-};
-
-const pc: ObjectDef = {
-  id: 'pc', name: 'Комп', group: 'workplace', icon: '🖥️',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
-  aWeight: 0.35, pWeight: 0.05, maxLevel: 100,
-  desc: 'Монтаж быстрее: тап бьёт сильнее.',
-  requires: 'tech',
-  tierNames: TIER_STAGES.pc,
+  tierNames: TIER_STAGES.camera,
   currentLevel: 0,
 };
 
 const furniture: ObjectDef = {
   id: 'furniture', name: 'Мебель', group: 'workplace', icon: '🪑',
-  startLevel: 0, costBase: $(100), costGrowth: 1.15,
-  aWeight: 0.45, pWeight: 0.05, maxLevel: 100,
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.45, pWeight: 0.05, maxLevel: MAX_LEVEL,
   desc: 'Комфортное место силы: максимум с тапа.',
-  requires: 'tech',
+  requires: 'camera',
   tierNames: TIER_STAGES.furniture,
   currentLevel: 0,
 };
 
-// ==================== НАВЫКИ (мультипликаторы тапа) ====================
-
-const charisma: ObjectDef = {
-  id: 'charisma', name: 'Харизма', group: 'skills', icon: '🗣️',
-  startLevel: 0, costBase: $(500), costGrowth: 1.25,
-  aWeight: 0.8, pWeight: 0, maxLevel: 50,
-  desc: 'Каждый уровень: +80% к доходу за тап.',
-  requires: 'pc',
+const pc: ObjectDef = {
+  id: 'pc', name: 'Комп', group: 'workplace', icon: '🖥️',
+  startLevel: 0, costBase: $(100), costGrowth: gameConfig.pricing.upgradeMarkup,
+  aWeight: 0.35, pWeight: 0.05, maxLevel: MAX_LEVEL,
+  desc: 'Монтаж быстрее: тап бьёт сильнее.',
+  requires: 'furniture',
+  tierNames: TIER_STAGES.pc,
   currentLevel: 0,
 };
 
-const emotion: ObjectDef = {
-  id: 'emotion', name: 'Эмоциональность', group: 'skills', icon: '😤',
-  startLevel: 0, costBase: $(1000), costGrowth: 1.25,
-  aWeight: 1.2, pWeight: 0, maxLevel: 50,
-  desc: 'Каждый уровень: +120% к доходу за тап.',
-  requires: 'charisma',
+// ==================== НАВЫКИ (мультипликаторы тапа) ====================
+// Открываются ВСЕ сразу после покупки Камеры — между собой НЕ гейтятся
+// (раньше цепочка харизма→эмоция→юмор). Сила и цена растут по порядку:
+// Харизма → Интеллект → Юмор → Эмоциональность.
+
+const charisma: ObjectDef = {
+  id: 'charisma', name: 'Харизма', group: 'skills', icon: '🗣️',
+  startLevel: 0, costBase: $(500), costGrowth: gameConfig.pricing.skillMarkup,
+  aWeight: 0.8, pWeight: 0, maxLevel: MAX_LEVEL,
+  desc: 'Каждый уровень: +80% к доходу за тап.',
+  requires: 'camera',
+  currentLevel: 0,
+};
+
+const intellect: ObjectDef = {
+  id: 'intellect', name: 'Интеллект', group: 'skills', icon: '💡',
+  startLevel: 0, costBase: $(800), costGrowth: gameConfig.pricing.skillMarkup,
+  aWeight: 1.0, pWeight: 0, maxLevel: MAX_LEVEL,
+  desc: 'Каждый уровень: +100% к доходу за тап.',
+  requires: 'camera',
   currentLevel: 0,
 };
 
 const humor: ObjectDef = {
   id: 'humor', name: 'Юмор', group: 'skills', icon: '🤡',
-  startLevel: 0, costBase: $(2000), costGrowth: 1.25,
-  aWeight: 1.5, pWeight: 0, maxLevel: 50,
+  startLevel: 0, costBase: $(1200), costGrowth: gameConfig.pricing.skillMarkup,
+  aWeight: 1.2, pWeight: 0, maxLevel: MAX_LEVEL,
+  desc: 'Каждый уровень: +120% к доходу за тап.',
+  requires: 'camera',
+  currentLevel: 0,
+};
+
+const emotion: ObjectDef = {
+  id: 'emotion', name: 'Эмоциональность', group: 'skills', icon: '😤',
+  startLevel: 0, costBase: $(2000), costGrowth: gameConfig.pricing.skillMarkup,
+  aWeight: 1.5, pWeight: 0, maxLevel: MAX_LEVEL,
   desc: 'Каждый уровень: +150% к доходу за тап.',
-  requires: 'emotion',
+  requires: 'camera',
   currentLevel: 0,
 };
 
@@ -162,8 +185,8 @@ const humor: ObjectDef = {
 export const objectDefs: readonly ObjectDef[] = [
   house, car, bg,
   watch, hair, clothes,
-  furniture, pc, tech, // порядок карточек = порядку на сцене: стул → монитор → микрофон
-  charisma, emotion, humor,
+  camera, furniture, pc, // порядок карточек = порядку покупки: камера → мебель → комп
+  charisma, intellect, humor, emotion, // все открываются после камеры
 ];
 
 export const objectById: ReadonlyMap<ObjectId, ObjectDef> = new Map(
@@ -180,7 +203,7 @@ export function getObject(id: ObjectId): ObjectDef {
 /** Метки и иконки групп-вкладок — единственное место, знающее про группы в UI. */
 export const groupMeta: Record<ObjectGroup, { label: string; icon: string }> = {
   property:  { label: 'Имущество', icon: '🏠' },
-  outfit:    { label: 'Шмот',      icon: '👕' },
+  outfit:    { label: 'Одежда',    icon: '👕' },
   workplace: { label: 'Рабочее место', icon: '🖥️' },
   skills:    { label: 'Навыки',    icon: '🧠' },
 };

@@ -2,24 +2,28 @@
   "version": 1,
   "sourcesDir": "art",
   "outputDir": "public/assets",
-  "webpQuality": 82,
+  "webpQuality": 88,
   "webpAlphaQuality": 100,
   "budget": {
     "totalMB": 90,
     "startupMB": 15,
-    "startupKeys": ["world/0", "character/0", "house/0"]
+    "startupKeys": ["world/0", "world_home/0", "character/0", "house/0"]
   },
   "groups": {
-    "world": { "label": "Фон", "w": 1120, "h": 1505, "stages": 6, "maxScale": 1 },
-    "yard": { "label": "Двор", "w": 1080, "h": 910, "stages": 3, "maxScale": 1 },
-    "house": { "label": "Дом", "w": 370, "h": 620, "stages": 4, "maxScale": 1 },
-    "car": { "label": "Машина", "w": 340, "h": 240, "stages": 3, "maxScale": 2 },
-    "character": { "label": "Игрок", "w": 330, "h": 690, "stages": 1, "maxScale": 2 },
-    "hair": { "label": "Причёска", "w": 330, "h": 240, "stages": 3, "maxScale": 2 },
-    "clothes": { "label": "Одежда", "w": 330, "h": 450, "stages": 3, "maxScale": 2 },
-    "watch": { "label": "Часы", "w": 150, "h": 215, "stages": 3, "maxScale": 2 },
-    "furniture": { "label": "Мебель", "w": 350, "h": 460, "stages": 3, "maxScale": 2 },
-    "tech": { "label": "Микрофон", "w": 350, "h": 460, "stages": 3, "maxScale": 2 },
-    "pc": { "label": "Комп", "w": 350, "h": 460, "stages": 3, "maxScale": 2 }
+    "world": { "label": "Фон улицы", "w": 1120, "h": 759, "stages": 5, "maxScale": 2 },
+    "world_home": { "label": "Фон квартиры", "w": 1120, "h": 759, "stages": 5, "maxScale": 2 },
+    "yard": { "label": "Двор", "w": 1080, "h": 912, "stages": 3, "maxScale": 2 },
+    "house": { "label": "Дом", "w": 384, "h": 640, "stages": 4, "maxScale": 2 },
+    "car": { "label": "Машина", "w": 352, "h": 240, "stages": 3, "maxScale": 2 },
+    "character": { "label": "Игрок", "w": 264, "h": 552, "stages": 1, "maxScale": 2 },
+    "hair": { "label": "Причёска", "w": 264, "h": 192, "stages": 3, "maxScale": 2 },
+    "clothes": { "label": "Одежда", "w": 264, "h": 360, "stages": 3, "maxScale": 2 },
+    "watch": { "label": "Часы", "w": 120, "h": 176, "stages": 3, "maxScale": 2 },
+    "furniture": { "label": "Мебель (улица)", "w": 360, "h": 480, "stages": 3, "maxScale": 2 },
+    "camera": { "label": "Камера (улица)", "w": 360, "h": 480, "stages": 3, "maxScale": 2 },
+    "pc": { "label": "Комп (улица)", "w": 360, "h": 480, "stages": 3, "maxScale": 2 },
+    "furniture_home": { "label": "Мебель (дом)", "w": 360, "h": 480, "stages": 3, "maxScale": 2 },
+    "camera_home": { "label": "Камера (дом)", "w": 360, "h": 480, "stages": 3, "maxScale": 2 },
+    "pc_home": { "label": "Комп (дом)", "w": 360, "h": 480, "stages": 3, "maxScale": 2 }
   }
 }

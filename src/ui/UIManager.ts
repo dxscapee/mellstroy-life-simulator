@@ -1,37 +1,31 @@
 import { events } from '@engine/eventBus';
 import { formatCount, formatMoney, formatIncomePerSecond } from '@engine/format';
-import { worldProgressFrac } from '@engine/WorldProgress';
+import { LOCATIONS } from '@data/locations';
+import type { SceneKind } from '@data/assets';
 import type { Game } from '@engine/Game';
 import { Modal } from './OfflineModal';
 import { ObjectSheet } from './ObjectSheet';
-import { EraPopup } from './EraPopup';
+import { LocationPopup } from './LocationPopup';
+import type { LocationPreviewProvider } from './LocationPopup';
+import { SceneButton } from './SceneButton';
 
 /** Геометрия кольца прогресса мира (viewBox 60×60). */
 const WORLD_RING_R = 26;
-
-/** id градиента дуги кольца (на него ссылается CSS: stroke: url(#…)). */
-const WORLD_RING_GRADIENT_ID = 'world-ring-gradient';
-
-/** Цвета градиента дуги: зелёный → салатовый → жёлтый (как «дорога» прогресса). */
-const WORLD_RING_GRADIENT_STOPS: ReadonlyArray<readonly [string, string]> = [
-  ['0%', '#2ecc71'],
-  ['55%', '#a3e435'],
-  ['100%', '#f4b942'],
-];
 
 /**
  * Композитор HTML-слоя: создаёт HUD, выноску и модалку, подписывает их
  * на события движка. Логики не содержит — только связывание и рендер.
  *
- * Верхняя панель .hud-bar — центрируется как ОДНО ЦЕЛОЕ и по ширине равна
- * нижнему меню (--menu-w, left:50% + translateX(-50%)). Внутри неё блок плашек
- * .hud-top (без подписей — только значения) и ПРИКРЕПЛЁННЫЕ к его краям кольцо
- * прогресса мира (слева) и кнопка настроек (справа): они позиционируются от
- * краёв БЛОКА (right/left: calc(100% + 10px)), а не от краёв окна, поэтому при
- * ресайзе не разъезжаются от меню.
+ * Верхняя панель .hud-bar — блок плашек по ширине нижнего меню, СДВИНУТЫЙ
+ * вправо от центра (--hud-shift): слева остаётся полоса под кольцо прогресса
+ * мира, которое ПРИКРЕПЛЕНО К ЛЕВОМУ КРАЮ БЛОКА (right: calc(100% + зазор)),
+ * а не к краю окна, поэтому при ресайзе не расходится с меню. Размер кольца
+ * считает CSS (--ring-size) — от свободного места слева.
+ * Под кольцом — название ТЕКУЩЕЙ ЛОКАЦИИ (Гомель … Кипр).
  * Плашки (порядок DOM row-major, без подписей):
  *   [баланс][пассив] / [новая валюта «soon»][актив] / [подписчики + бар]
- * Смысл ячейки — в цвете и суффиксе значения, полное имя — в title.
+ * Смысл ячейки: значение (все — одного белого цвета, ТЗ 2026-10-02),
+ * полное имя — в title.
  */
 export class UIManager {
   readonly sheet: ObjectSheet;
@@ -44,16 +38,18 @@ export class UIManager {
   private subBarFill: HTMLElement;
   private subCountEl: HTMLElement;
   private subGoalEl: HTMLElement;
-  /** Попап-галерея эпох: открывается кольцом прогресса (чипа в HUD больше нет). */
-  private eraPopup: EraPopup;
-  /** Кольцо прогресса мира (слева сверху) + его SVG-дуга и % внутри. */
+  /** Попап локаций (карусель из 5): открывается кольцом прогресса. */
+  private locPopup: LocationPopup;
+  /** Кнопка перехода между сценами (улица ↔ дом) — сбоку справа. */
+  private sceneButton: SceneButton | null = null;
+  /** Кольцо прогресса локации (слева сверху) + его SVG-дуга и % внутри. */
   private worldRing: HTMLButtonElement;
   private worldRingFg: SVGCircleElement;
   private worldRingPct: HTMLElement;
+  /** Название текущей локации под кольцом. */
+  private worldLabel: HTMLElement;
   private lastWorldPct = -1;
   private readonly worldRingC: number;
-  /** Кнопка настроек (пока заглушка — сюда лягут графика/звук). */
-  private settingsBtn: HTMLButtonElement;
   private lastBalanceRendered: string | null = null;
   private lastPassiveRendered: string | null = null;
   private lastActiveRendered: string | null = null;
@@ -65,11 +61,22 @@ export class UIManager {
   constructor(
     uiRoot: HTMLElement,
     private readonly game: Game,
+    /**
+     * Провайдер превью локаций (URL фона из манифеста) — даёт main из AssetRegistry,
+     * поэтому ui остаётся в стороне от view (только данные, без импорта слоя).
+     */
+    locPreview?: LocationPreviewProvider,
+    /**
+     * Провайдер ТЕКУЩЕЙ сцены и переключатель сцен — тоже от main (ui не знает
+     * про GameView): кнопка сцен читает сцену у сцены и просит её переключить.
+     */
+    sceneProvider?: () => SceneKind,
+    sceneSwitch?: (scene: SceneKind) => void,
   ) {
     this.worldRingC = 2 * Math.PI * WORLD_RING_R;
-    // Попап-галерея эпох: открывается кольцом прогресса (см. ниже). Раньше
-    // его открывал и чип эпохи в HUD — чипа больше нет, роль осталась кольцу.
-    this.eraPopup = new EraPopup(uiRoot, game.worldWatch);
+    // Попап локаций открывается кольцом прогресса (см. ниже) — бывшая
+    // галерея эпох, переделанная под локации (решение владельца 2026-10-03).
+    this.locPopup = new LocationPopup(uiRoot, game, locPreview);
 
     // ---------- верхняя панель: блок плашек + кольцо и настройки по его краям ----------
     // .hud-bar центрируется как одно целое (та же ширина, что у нижнего меню).
@@ -127,40 +134,25 @@ export class UIManager {
 
     hud.appendChild(this.subChip);
 
-    // ---------- кольцо прогресса мира (слева от HUD) ----------
-    // Круглая кнопка-шкала: тёмная таблетка в стиле плашек HUD, градиентная
-    // дуга прогресса (зелёный → жёлтый) и % внутри. Заполняется от ЖИВОЙ дроби
-    // периода worldProgressFrac(totalEarned) — кэш WorldWatch «заморожен»
-    // между сменами. Клик — галерея эпох: та же функция, что была у чипа.
+    // ---------- кольцо прогресса локации (слева от HUD) ----------
+    // Круглая кнопка-шкала: тёмная таблетка в стиле плашек HUD, сплошная
+    // зелёная дуга прогресса (акцент) и % внутри. Заполняется от ПРОКАЧКИ
+    // текущей локации (средний уровень объектов / её кап) — деньги на шкалу
+    // больше не влияют. Клик — попап локаций; при 100% кольцо подсвечено
+    // (класс .evolved), переход — кнопкой в попапе.
     this.worldRing = document.createElement('button');
     this.worldRing.className = 'world-ring js-interactive';
     this.worldRing.type = 'button';
-    this.worldRing.title = 'Мир: эпохи';
-    this.worldRing.setAttribute('aria-label', 'Прогресс эпохи мира');
+    this.worldRing.title = 'Локации';
+    this.worldRing.setAttribute('aria-label', 'Прогресс локации');
 
     const NS = 'http://www.w3.org/2000/svg';
     const ringSvg = document.createElementNS(NS, 'svg');
     ringSvg.setAttribute('viewBox', '0 0 60 60');
     ringSvg.classList.add('world-ring-svg');
 
-    // Градиент дуги задаётся один раз; CSS ссылается на него через
-    // stroke: url(#world-ring-gradient) — перекраски из JS не нужны.
-    const ringDefs = document.createElementNS(NS, 'defs');
-    const ringGrad = document.createElementNS(NS, 'linearGradient');
-    ringGrad.setAttribute('id', WORLD_RING_GRADIENT_ID);
-    ringGrad.setAttribute('x1', '0');
-    ringGrad.setAttribute('y1', '0');
-    ringGrad.setAttribute('x2', '1');
-    ringGrad.setAttribute('y2', '1');
-    for (const [offset, color] of WORLD_RING_GRADIENT_STOPS) {
-      const stop = document.createElementNS(NS, 'stop');
-      stop.setAttribute('offset', offset);
-      stop.setAttribute('stop-color', color);
-      ringGrad.appendChild(stop);
-    }
-    ringDefs.appendChild(ringGrad);
-
     // Дорожка (весь круг) под дугой прогресса — видно, сколько ещё осталось.
+    // Цвет дуги задан в CSS (stroke: var(--accent)) — SVG без defs и градиентов.
     const ringTrack = document.createElementNS(NS, 'circle');
     ringTrack.setAttribute('cx', '30');
     ringTrack.setAttribute('cy', '30');
@@ -174,28 +166,32 @@ export class UIManager {
     this.worldRingFg.classList.add('world-ring-fg');
     this.worldRingFg.style.strokeDasharray = String(this.worldRingC);
     this.worldRingFg.style.strokeDashoffset = String(this.worldRingC);
-    ringSvg.append(ringDefs, ringTrack, this.worldRingFg);
+    ringSvg.append(ringTrack, this.worldRingFg);
 
     this.worldRingPct = document.createElement('span');
     this.worldRingPct.className = 'world-ring-pct';
     this.worldRingPct.textContent = '0%';
 
-    this.worldRing.append(ringSvg, this.worldRingPct);
-    this.worldRing.addEventListener('click', () => this.eraPopup.toggle());
-    bar.appendChild(this.worldRing); // прикреплено к ЛЕВОМУ краю блока плашек
+    // Название локации — под кольцом, внутри самой кнопки: клик по подписи
+    // открывает тот же попап локаций (а не уходит тапом в сцену). Ширину подписи
+    // держит CSS (100% кольца) — за компоновку верхней панели не выходит.
+    this.worldLabel = document.createElement('span');
+    this.worldLabel.className = 'world-label';
+    this.worldLabel.textContent = LOCATIONS[0].name;
 
-    // ---------- кнопка настроек (справа сверху, заглушка под будущий функционал) ----------
-    this.settingsBtn = document.createElement('button');
-    this.settingsBtn.className = 'settings-btn js-interactive';
-    this.settingsBtn.type = 'button';
-    this.settingsBtn.title = 'Настройки';
-    this.settingsBtn.setAttribute('aria-label', 'Настройки');
-    this.settingsBtn.textContent = '⚙';
-    this.settingsBtn.addEventListener('click', () => {
-      // Пока пусто: здесь откроется панель настроек (графика/звук и т.д.).
-    });
-    bar.appendChild(this.settingsBtn); // прикреплено к ПРАВОМУ краю блока плашек
+    this.worldRing.append(ringSvg, this.worldRingPct, this.worldLabel);
+    this.worldRing.addEventListener('click', () => this.locPopup.toggle());
+    bar.appendChild(this.worldRing); // прикреплено к ЛЕВОМУ краю блока плашек
     uiRoot.appendChild(bar);
+
+    // Кнопка перехода между сценами — отдельный виджет сбоку (не в блоке
+    // плашек): текущая сцена живёт в view, поэтому UI получает её провайдером.
+    this.sceneButton = new SceneButton(
+      uiRoot,
+      () => sceneProvider?.() ?? 'street',
+      (scene) => sceneSwitch?.(scene),
+      (listener) => events.on('scene:changed', listener),
+    );
 
     this.sheet = new ObjectSheet(uiRoot, game);
     this.modal = new Modal(uiRoot);
@@ -203,6 +199,7 @@ export class UIManager {
     this.renderHud();
     this.renderSubscribers(true);
     this.renderWorldRing();
+    this.renderWorldLabel();
 
     // ---------- подписки ----------
     this.unsubscribers.push(
@@ -211,11 +208,18 @@ export class UIManager {
       events.on('object:levelup', () => this.forceHud()),
       events.on('subscribers:changed', () => this.renderSubscribers()),
       events.on('subscribers:ready', () => this.renderSubscribers()),
-      // Смена периода мира: кольцо вспыхивает (попап обновит себя сам).
-      events.on('world:changed', () => {
+      // Переход на другую локацию: кольцо вспыхивает (попап обновит себя сам),
+      // подпись локации и шкала пересчитываются под новую полосу уровней.
+      events.on('location:changed', () => {
         this.worldRing.classList.remove('evolved');
         void this.worldRing.offsetWidth; // рестарт CSS-анимации
         this.worldRing.classList.add('evolved');
+        this.lastWorldPct = -1; // шкала живёт в новом диапазоне уровней
+        this.renderWorldLabel();
+        this.renderWorldRing();
+        // Кап локации сменился — карточки выноски перерисовываем принудительно:
+        // уровни не менялись, по ним штатный диф карточек не сработает.
+        if (this.sheet.isOpen()) this.sheet.refresh(true);
       }),
       // Полный сброс (дебаг): HUD и подписчики могут не измениться по ключам — рендерим принудительно.
       events.on('game:reset', () => {
@@ -223,6 +227,7 @@ export class UIManager {
         this.lastWorldPct = -1;
         this.forceHud();
         this.renderWorldRing();
+        this.renderWorldLabel();
       }),
     );
   }
@@ -260,7 +265,7 @@ export class UIManager {
     this.worldThrottle += 1;
     if (this.worldThrottle % 5 === 0) this.renderWorldRing();
     if (this.sheet.isOpen()) this.sheet.refresh();
-    if (this.eraPopup.isOpenState()) this.eraPopup.refresh();
+    if (this.locPopup.isOpenState()) this.locPopup.refresh();
   }
 
   private forceHud(): void {
@@ -318,10 +323,11 @@ export class UIManager {
     this.subChip.classList.toggle('claimable', s.claimable);
   }
 
-  /** Кольцо прогресса: живая дробь периода мира, DOM — только при смене целого %. */
+  /** Кольцо прогресса: прокачка текущей локации, DOM — только при смене целого %. */
   private renderWorldRing(): void {
-    const pct = Math.floor(worldProgressFrac(this.game.state.totalEarned) * 100);
+    const pct = Math.floor(this.game.state.locationProgress() * 100);
     if (pct === this.lastWorldPct) return;
+    const wasReady = this.lastWorldPct >= 100;
     this.lastWorldPct = pct;
 
     // stroke-dashoffset: полный круг при pct=100. CSS transition — плавный ход.
@@ -329,10 +335,29 @@ export class UIManager {
       this.worldRingC * (1 - pct / 100),
     );
     this.worldRingPct.textContent = `${pct}%`;
+
+    // Шкала добежала до 100% — кольцо вспыхивает («готово к переходу»).
+    if (pct >= 100 && !wasReady) {
+      this.worldRing.classList.remove('evolved');
+      void this.worldRing.offsetWidth; // рестарт CSS-анимации
+      this.worldRing.classList.add('evolved');
+    }
+  }
+
+  /**
+   * Название текущей локации под кольцом. Меняется только при переходе,
+   * поэтому зовётся не в тике, а по событиям (location:changed / game:reset).
+   */
+  private renderWorldLabel(): void {
+    const name = LOCATIONS[Math.min(this.game.state.location, LOCATIONS.length - 1)].name;
+    if (name === this.worldLabel.textContent) return;
+    this.worldLabel.textContent = name;
   }
 
   destroy(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers = [];
+    this.sceneButton?.destroy();
+    this.sceneButton = null;
   }
 }

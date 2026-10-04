@@ -6,7 +6,6 @@ import { GameState } from './GameState';
 import { GameLoop } from './GameLoop';
 import { OfflineProgress } from './OfflineProgress';
 import { SaveManager } from './SaveManager';
-import { WorldWatch } from './WorldProgress';
 import type { BuyMode, ObjectDef } from './types';
 
 /**
@@ -27,8 +26,6 @@ export class Game {
   private saveTimer = 0;
   /** Таймер пассивного прироста подписчиков (раз в gameConfig.subscribers.addIntervalSec). */
   private subscriberTimer = 0;
-  /** Наблюдатель периода мира: UI и сцена читают .stage, аллокаций на тике нет. */
-  readonly worldWatch = new WorldWatch();
   private saveOnHideBound = this.handleVisibilityChange.bind(this);
 
   constructor() {
@@ -57,9 +54,6 @@ export class Game {
       this.state.recalculatePassiveIncome();
     }
 
-    // Стадия мира на старте (сейв мог быть далеко в прогрессе).
-    this.worldWatch.update(this.state.totalEarned);
-
     events.emit('money:changed', undefined);
   }
 
@@ -79,13 +73,6 @@ export class Game {
 
   private tick(dt: number): void {
     this.state.applyIncomeForDuration(dt);
-
-    // Период мира: проверка раз в тик — примитивное сравнение period, без аллокаций.
-    // Растёт и от пассива, и от тапов: применённый доход уже в totalEarned.
-    if (this.worldWatch.update(this.state.totalEarned)) {
-      const s = this.worldWatch.stage;
-      events.emit('world:changed', { period: s.period, era: s.era });
-    }
 
     // Пассивный прирост подписчиков: раз в интервал капает пассивный доход за него.
     this.subscriberTimer += dt;
@@ -159,6 +146,18 @@ export class Game {
     events.emit('game:saved', undefined);
   }
 
+  /**
+   * Переход на следующую локацию (кнопка в попапе локаций, открывается кольцом
+   * при 100% прокачки). false — нельзя: не вкачано или это последняя локация.
+   * Сейв сразу: смена локации — редкое и важное событие, терять нельзя.
+   */
+  advanceLocation(): boolean {
+    if (!this.state.advanceLocation()) return false;
+    events.emit('location:changed', { location: this.state.location });
+    this.saveNow();
+    return true;
+  }
+
   /** Полный сброс прогресса (используется дебаг-панелью). */
   resetAll(): void {
     this.saveManager.clear();
@@ -167,10 +166,8 @@ export class Game {
     events.emit('game:reset', undefined);
     events.emit('money:changed', undefined);
 
-    // Мир откатывается в нулевой период: сцена и чип эпохи перечитываются.
-    this.worldWatch.update(this.state.totalEarned);
-    const s = this.worldWatch.stage;
-    events.emit('world:changed', { period: s.period, era: s.era });
+    // Локация откатывается в нулевую — сцена (фон) и подпись кольца перечитываются.
+    events.emit('location:changed', { location: this.state.location });
   }
 
   /** В dev-режиме дебаг-панель может ускорять время. В проде — no-op. */
@@ -180,12 +177,10 @@ export class Game {
 
   /**
    * Пересинхронизация UI после ПРЯМЫХ мутаций state из dev-инструментов
-   * (undo денег и т.п.): мир перечитает стадию, HUD перерисуется.
+   * (undo денег, applyLevels и т.п.): HUD и кольцо перерисуются на ближайшем
+   * тике (кольцо читает живую прокачку, отдельных кэшей у него нет).
    */
   refreshAfterDebug(): void {
-    this.worldWatch.update(this.state.totalEarned);
-    const s = this.worldWatch.stage;
-    events.emit('world:changed', { period: s.period, era: s.era });
     events.emit('money:changed', undefined);
   }
 
