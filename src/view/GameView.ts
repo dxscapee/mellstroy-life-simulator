@@ -11,7 +11,7 @@ import type { SceneObjectInfo } from '@data/objects';
 import type { ObjectId } from '@engine/types';
 import { SCENE_GROUPS, SCENE_ORDER, assetGroupOf, assetKey, backgroundGroup } from '@data/assets';
 import type { AssetGroup, SceneKind } from '@data/assets';
-import { WorldLayer } from './WorldLayer';
+import { WorldLayer, WORLD_REF_H, WORLD_REF_W } from './WorldLayer';
 import type { AssetRegistry } from './assetRegistry';
 
 interface FloatText {
@@ -31,7 +31,7 @@ interface FloatText {
  * ресайзе (фикс владельца 2026-09-30: раньше X фиксировался один раз при init,
  * и при сужении окна дом/двор/фон «уезжали» вправо); Y — центр композиции
  * между HUD и таб-баром. Размеры константны: непропорциональное окно срезает
- * край объекта, но сам объект остаётся в центре.
+ * край объекта, но сам объект остаётся в центре; с 2026-10-04 размер ещё умножается на зум сцены (растёт вровень с фоном, когда тот начинает расти от ширины — см. applySceneScale).
  *
  * ДИНАМИЧЕСКИЕ (игрок, машина) — якорь от центра композиции; на широких окнах
  * отъезжают от центра (жёлтые стрелки чертежа): drift = излишек ширины ×
@@ -320,10 +320,9 @@ export class GameView {
 
     // Ленивая загрузка: догрузившиеся текстуры сами подменяют заглушки.
     this.offAssets = this.assets.onLoaded(() => this.refreshTextures());
-    // Тело игрока — единственная стадия (в состояниях объектов его нет).
-    // Группы ассетов игрока и носимых одинаковы в обеих сценах, поэтому
-    // стадия ставится один раз (setStage берёт группу из дефа).
-    this.setStage(this.character, 0);
+    // Тело игрока: у него НЕТ тиров — скин (стадия) следует за ЛОКАЦИЕЙ, а не
+    // за уровнями. Стадию ставит applySceneBackground (в bootstrap он зовётся
+    // до boot.hide, поэтому игрок появляется уже в нужном скине).
 
     // Ввод: вся сцена кликабельна, тапы «пробивают» с HTML-оверлея
     // (у оверлея pointer-events: none, у холста — auto).
@@ -487,7 +486,7 @@ export class GameView {
    * ЕДИНЫЙ ЗАКОН РАСКЛАДКИ (init + каждый ресайз): статика центрируется по X
    * экрана, динамика садится по якорям от центра композиции (дрейф на широких
    * окнах, squeeze на узких), а рабочее место по Y СТОИТ НА ПОЛУ (FLOOR_GAP от
-   * нижнего края окна). Размеры объектов константны — зума сцены нет.
+   * нижнего края окна). Размеры объектов масштабируются зумом сцены (вровень с фоном от порога роста — см. applySceneScale).
    */
   private layout(): void {
     const w = this.app.screen.width;
@@ -501,6 +500,16 @@ export class GameView {
     // Фон: тот же центр + cover под ТЕКУЩИЙ экран (иначе при сужении окна
     // он, как и статика, «уезжал» вправо — баг владельца 2026-09-30).
     this.world.layout(w, h);
+
+    // МАСШТАБ СЦЕНЫ — «вровень с фоном»: объекты растут ровно во столько раз,
+    // во сколько вырос фон, и только с момента, когда фон перестаёт упираться в
+    // ВЫСОТУ окна и начинает расти от ШИРИНЫ (cover > height-fit). Ниже порога и
+    // на узких/телефонных окнах zoom = 1 — вид прежний. Позиции и дрейф НЕ трогаем:
+    // объект растёт вокруг своего центра и остаётся там же — просто крупнее.
+    const heightFit = h > 0 ? h / WORLD_REF_H : 1;
+    const cover = Math.max(w / WORLD_REF_W, heightFit);
+    const zoom = Math.max(1, cover / heightFit);
+    this.applySceneScale(zoom);
 
     // Статика: X ВСЕГДА центр экрана; Y — центр композиции между HUD и таб-баром.
     const cx = w * 0.5;
@@ -584,8 +593,10 @@ export class GameView {
     if (!item) return;
     const rec = this.visuals.get(item);
     if (!rec) return;
-    const rectTop = item.y - rec.spec.h / 2;
-    rec.label.y = Math.max(rectTop - 6, topLimit + 4) - item.y;
+    const zoom = item.scale.y || 1;
+    // Верх прямоугольника — в ЭКРАННЫХ координатах (узел масштабирован зумом сцены).
+    const rectTop = item.y - (rec.spec.h / 2) * zoom;
+    rec.label.y = (Math.max(rectTop - 6, topLimit + 4) - item.y) / zoom;
   }
 
   /** Общий стиль меток-подписей. */
@@ -597,6 +608,23 @@ export class GameView {
       fill: 0xffffff,
       stroke: { color: 0x0b0e12, width: 4 },
     });
+  }
+
+  /**
+   * Масштаб зума ко ВСЕМ объектам сцены (фон масштабируется сам в WorldLayer).
+   * Меняем только РАЗМЕР — позиции ставит layout, объект растёт вокруг центра.
+   * Игрок — через charBaseScale: сквиш на тап и его плавный возврат идут к
+   * базовому масштабу, иначе зум сбрасывался бы обратно к 1.
+   */
+  private applySceneScale(zoom: number): void {
+    if (this.yard) this.yard.scale.set(zoom);
+    if (this.house) this.house.scale.set(zoom);
+    if (this.car) this.car.scale.set(zoom);
+    for (const node of this.workplace.values()) node.scale.set(zoom);
+    if (this.character) {
+      this.charBaseScale = zoom;
+      this.character.scale.set(zoom);
+    }
   }
 
   /** Центр композиции по Y: свободная полоса между HUD и таб-баром. */
@@ -649,6 +677,10 @@ export class GameView {
    */
   applySceneBackground(location: number): void {
     this.lastLocation = location;
+
+    // Скин игрока тоже следует за ЛОКАЦИЕЙ (art/character/<локация>): ставим
+    // запрошенную стадию, текстура подтянется лениво (resolveKey с откатом вниз).
+    this.setStage(this.character, location);
 
     const scene = this.currentScene;
     const key = assetKey(backgroundGroup(scene), location);

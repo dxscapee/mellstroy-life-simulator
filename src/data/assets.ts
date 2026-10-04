@@ -120,11 +120,12 @@ export const SCENE_BACKGROUND_GROUP: Record<SceneKind, AssetGroup> = {
 /** Группа фона для сцены (data-функция вместо константы: сцен стало две). */
 export const backgroundGroup = (scene: SceneKind): AssetGroup => SCENE_BACKGROUND_GROUP[scene];
 
-/** Группа постоянного тела игрока (без стадий). */
+/**
+ * Группа тела игрока. Скин (стадия) зависит от ЛОКАЦИИ, а не от тиров:
+ * art/character/<индекс локации>.<ext> (0..4 = Гомель..Кипр). Стадию ставит
+ * GameView.applySceneBackground — скин следует за текущей локацией.
+ */
 export const CHARACTER_ASSET_GROUP: AssetGroup = 'character';
-
-/** Стадия тела игрока (у персонажа нет тиров). */
-export const CHARACTER_ASSET_STAGE = 0;
 
 /** Манифест, который пишет npm run assets и читает игра (путь относительный). */
 export const ASSET_MANIFEST_URL = 'assets/manifest.json';
