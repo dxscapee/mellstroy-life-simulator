@@ -8,8 +8,9 @@ import {
   TextStyle,
 } from 'pixi.js';
 import type { SceneObjectInfo } from '@data/objects';
-import type { AssetGroup } from '@data/assets';
-import { SCENE_GROUPS, WORLD_ASSET_GROUP, assetKey } from '@data/assets';
+import type { ObjectId } from '@engine/types';
+import { SCENE_GROUPS, SCENE_ORDER, assetGroupOf, assetKey, backgroundGroup } from '@data/assets';
+import type { AssetGroup, SceneKind } from '@data/assets';
 import { WorldLayer } from './WorldLayer';
 import type { AssetRegistry } from './assetRegistry';
 
@@ -49,8 +50,15 @@ interface FloatText {
  * Все объекты — ПРЯМОУГОЛЬНИКИ-ЗАГЛУШКИ с номером и размером в px. Размеры и
  * позиции истинные — визуальных правок геометрии нет. Когда в манифесте есть
  * ассет (см. @data/assets и ASSETS.md), заглушка ПОДМЕНЯЕТСЯ спрайтом той же
- * геометрии: стадия — по тиру, фон — по эпохе; загрузка ленивая, ключи резолвит
+ * геометрии: стадия — по тиру, фон — по локации; загрузка ленивая, ключи резолвит
  * AssetRegistry. Раскладка о текстурах не знает и не меняется вообще.
+ *
+ * СЦЕНЫ (улица / дом): объекты сцены живут в ДВУХ корневых контейнерах —
+ * streetRoot (фон улицы, двор, дом, машина) и homeRoot (рабочее место), — а
+ * игрок с носимыми вынесен в общий корень поверх обоих и виден в ОБЕИХ сценах.
+ * Переключение — setScene: скрывает один корень, показывает другой и меняет
+ * фон (ключи world/<локация> и world_home/<локация>). Раскладка, размеры и
+ * уровни объектов от сцены не зависят — это перенос места, не прокачки.
  */
 
 /** Эталон композиции (весь чертёж): SCENE_REF_W×SCENE_REF_H, центр по Y. */
@@ -76,6 +84,8 @@ const CY_FRAC = 0.46;
  * заглушек нет.
  */
 interface RectSpec {
+  /** id объекта (engine/types) — по нему сцена выбирает группу ассета сцены. */
+  id: ObjectId;
   /** Группа ассетов: папка мастера в art/ и ключ ассета в манифесте. */
   group: AssetGroup;
   w: number;
@@ -117,10 +127,10 @@ const sceneBox = (group: AssetGroup): { w: number; h: number } => ({
  * (решение владельца 2026-09-30).
  * Фон(5) живёт в WorldLayer (WORLD_REF_W/H — его размер текстуры).
  */
-const YARD_SPEC: RectSpec = { group: 'yard', ...sceneBox('yard'), color: 0xff00aa, num: '6', label: 'ДВОР' };
-const HOUSE_SPEC: RectSpec = { group: 'house', ...sceneBox('house'), color: 0x00a844, num: '4', label: 'ДОМ' };
-const CAR_SPEC: RectSpec = { group: 'car', ...sceneBox('car'), color: 0xe01010, num: '2', label: 'МАШИНА' };
-const CHAR_SPEC: RectSpec = { group: 'character', ...sceneBox('character'), color: 0xe01010, num: '1', label: 'ИГРОК' };
+const YARD_SPEC: RectSpec = { id: 'bg', group: 'yard', ...sceneBox('yard'), color: 0xff00aa, num: '6', label: 'ДВОР' };
+const HOUSE_SPEC: RectSpec = { id: 'house', group: 'house', ...sceneBox('house'), color: 0x00a844, num: '4', label: 'ДОМ' };
+const CAR_SPEC: RectSpec = { id: 'car', group: 'car', ...sceneBox('car'), color: 0xe01010, num: '2', label: 'МАШИНА' };
+const CHAR_SPEC: RectSpec = { id: 'character' as ObjectId, group: 'character', ...sceneBox('character'), color: 0xe01010, num: '1', label: 'ИГРОК' };
 /**
  * Рабочее место: ТРИ КОНГРУЭНТНЫХ слоя в ОДНОЙ точке, ОДНА геометрия на всех
  * (владелец 2026-09-30: «все объекты должны быть одинаковых размеров») — бокс
@@ -137,9 +147,9 @@ const CHAR_SPEC: RectSpec = { group: 'character', ...sceneBox('character'), colo
 // Размеры — из паспорта ассетов; пайплайн проверяет, что три слоя конгруэнтны.
 // (раскладка стопки опирается только на высоту: низ группы стоит на полу)
 const WORKPLACE_H = SCENE_GROUPS.camera.h;
-const FURNITURE_SPEC: RectSpec = { group: 'furniture', ...sceneBox('furniture'), color: 0xf59e0b, num: '12', label: 'МЕБЕЛЬ', lift: 0 };
-const CAMERA_SPEC: RectSpec = { group: 'camera', ...sceneBox('camera'), color: 0x06b6d4, num: '11', label: 'КАМЕРА', lift: 27 };
-const PC_SPEC: RectSpec = { group: 'pc', ...sceneBox('pc'), color: 0xfacc15, num: '10', label: 'КОМП', lift: 54 };
+const FURNITURE_SPEC: RectSpec = { id: 'furniture', group: 'furniture', ...sceneBox('furniture'), color: 0xf59e0b, num: '12', label: 'МЕБЕЛЬ', lift: 0 };
+const CAMERA_SPEC: RectSpec = { id: 'camera', group: 'camera', ...sceneBox('camera'), color: 0x06b6d4, num: '11', label: 'КАМЕРА', lift: 27 };
+const PC_SPEC: RectSpec = { id: 'pc', group: 'pc', ...sceneBox('pc'), color: 0xfacc15, num: '10', label: 'КОМП', lift: 54 };
 
 /**
  * Носимые на игроке: дети контейнера игрока, наследуют его позицию и масштаб.
@@ -161,11 +171,11 @@ const PC_SPEC: RectSpec = { group: 'pc', ...sceneBox('pc'), color: 0xfacc15, num
  */
 const WORN_SPECS: Record<'hair' | 'clothes' | 'watch', RectSpec & { ox: number; oy: number }> = {
   // Причёска — верхняя полоса игрока (впритык к верхнему/левому/правому бортам).
-  hair: { group: 'hair', ...sceneBox('hair'), color: 0x22c55e, num: '8', label: 'ПРИЧЁСКА', ox: 0, oy: -180, lift: 21 },
+  hair: { id: 'hair', group: 'hair', ...sceneBox('hair'), color: 0x22c55e, num: '8', label: 'ПРИЧЁСКА', ox: 0, oy: -180, lift: 21 },
   // Одежда — нижняя полоса игрока: верх = низ причёски, низ = низ игрока.
-  clothes: { group: 'clothes', ...sceneBox('clothes'), color: 0x2563eb, num: '9', label: 'ОДЕЖДА', ox: 0, oy: 96, lift: 9 },
+  clothes: { id: 'clothes', group: 'clothes', ...sceneBox('clothes'), color: 0x2563eb, num: '9', label: 'ОДЕЖДА', ox: 0, oy: 96, lift: 9 },
   // Часы — слева, впритык к левому борту; верх на 15px ниже стыка полос.
-  watch: { group: 'watch', ...sceneBox('watch'), color: 0xa855f7, num: '7', label: 'ЧАСЫ', ox: -72, oy: 19, lift: 0 },
+  watch: { id: 'watch', group: 'watch', ...sceneBox('watch'), color: 0xa855f7, num: '7', label: 'ЧАСЫ', ox: -72, oy: 19, lift: 0 },
 };
 
 /** Якорь динамического объекта: смещение от центра композиции. */
@@ -218,6 +228,23 @@ export class GameView {
   private bg: Sprite | null = null;
   /** Задний слой мира (фон-прямоугольник, статический). */
   readonly world: WorldLayer = new WorldLayer();
+  /**
+   * КОРНИ СЦЕН: street — фон улицы/двор/дом/машина; home — рабочее место.
+   * Игрок с носимыми лежит ПОВЕРХ обоих (общий для сцен), поэтому видим всегда.
+   * Переключение — setScene: скрывается/показывается КОРЕНЬ целиком, а видимость
+   * конкретных узлов внутри ставит applySceneState (по владению и по сцене).
+   */
+  private streetRoot = new Container();
+  private homeRoot = new Container();
+  /** Какая сцена активна (её корень виден). */
+  private currentScene: SceneKind = 'street';
+  /**
+   * Последнее состояние объектов (тот же массив, без копий): нужно при смене
+   * сцены — видимость узлов зависит от сцены, а состояние объектов живёт не в
+   * GameView (его передаёт main). Без него купленный на улице объект остался бы
+   * невидимым после входа домой.
+   */
+  private lastStates: SceneObjectInfo[] | null = null;
   /** Статические слои: расставляются один раз (X намертво, Y — центр композиции). */
   private yard: Container | null = null;
   private house: Container | null = null;
@@ -233,10 +260,17 @@ export class GameView {
   private worldLabel: Text | null = null;
   /** Отписка от «ассет догрузился» (ставится в init, снимается в destroy). */
   private offAssets: (() => void) | null = null;
-  /** Запрошенная эпоха фона (-1 — ещё не применяли) для пере-синхронизации. */
+  /** Запрошенная локация фона (-1 — ещё не применяли) для пере-синхронизации. */
   private lastLocation = -1;
-  /** Ключ ассета, который сейчас на фоне (null — заглушка). */
-  private appliedWorldKey: string | null = null;
+  /**
+   * Ключ фона, удерживаемый ЗА КАЖДУЮ сцену (мы владельцы этих ассетов и
+   * отпускаем их только при смене ЛОКАЦИИ). Держим оба фона текущей локации:
+   * переключение сцены мговенное и не перезапускает видео-декодер. Максимум
+   * два живых фона — в пределах бюджетта (ASSETS.md §4.3, 1–2 видео).
+   */
+  private readonly heldWorldKey: Record<SceneKind, string | null> = { street: null, home: null };
+  /** Ключ, который РЕАЛЬНО стоит на слое фона (null — заглушка). */
+  private displayedWorldKey: string | null = null;
   /**
    * Принудительный показ подписей ВСЕХ объектов (номер · имя · размер) —
    * дебаг-фича из панели (кнопка «Подписи объектов»). По умолчанию ВЫКЛ:
@@ -269,9 +303,14 @@ export class GameView {
     });
     this.host.appendChild(this.app.canvas);
 
-    // Порядок depth: градиент → фон(мир) → двор → дом → машина/рабочее место/игрок.
+    // Порядок depth: градиент → фон(мир) → [streetRoot: двор → дом → машина]
+    // → [homeRoot: рабочее место] → игрок с носимыми (общий, поверх обеих сцен).
+    // Старт — УЛИЦА: домашний корень сразу выключен, чтобы он не проступил
+    // до первого applySceneState (там видимость ставится по состоянию и сцене).
     this.buildBackground();
     this.buildWorld();
+    this.homeRoot.visible = false;
+    this.app.stage.addChild(this.streetRoot, this.homeRoot);
     this.buildYard();
     this.buildHouse();
     this.buildCar();
@@ -282,6 +321,8 @@ export class GameView {
     // Ленивая загрузка: догрузившиеся текстуры сами подменяют заглушки.
     this.offAssets = this.assets.onLoaded(() => this.refreshTextures());
     // Тело игрока — единственная стадия (в состояниях объектов его нет).
+    // Группы ассетов игрока и носимых одинаковы в обеих сценах, поэтому
+    // стадия ставится один раз (setStage берёт группу из дефа).
     this.setStage(this.character, 0);
 
     // Ввод: вся сцена кликабельна, тапы «пробивают» с HTML-оверлея
@@ -363,24 +404,24 @@ export class GameView {
     return c;
   }
 
-  /** Двор — средний1 слой, статический. */
+  /** Двор — средний1 слой, статический. Живёт на УЛИЦЕ (streetRoot). */
   private buildYard(): void {
     this.yard = this.buildRect(YARD_SPEC);
     this.yard.visible = false; // появляется после покупки
-    this.app.stage.addChild(this.yard);
+    this.streetRoot.addChild(this.yard);
   }
 
-  /** Дом — средний2 слой, статический, частично за машиной. */
+  /** Дом — средний2 слой, статический, частично за машиной. Улица. */
   private buildHouse(): void {
     this.house = this.buildRect(HOUSE_SPEC);
-    this.app.stage.addChild(this.house);
+    this.streetRoot.addChild(this.house);
   }
 
-  /** Машина — передний слой, динамическая (отъезжает по жёлтой стрелке). */
+  /** Машина — передний слой, динамическая (отъезжает по жёлтой стрелке). Улица. */
   private buildCar(): void {
     this.car = this.buildRect(CAR_SPEC);
     this.car.visible = false; // появляется после покупки
-    this.app.stage.addChild(this.car);
+    this.streetRoot.addChild(this.car);
   }
 
   /**
@@ -399,7 +440,7 @@ export class GameView {
 
     for (const item of [furniture, camera, pc]) {
       item.visible = false; // появляется после покупки
-      this.app.stage.addChild(item);
+      this.homeRoot.addChild(item);
     }
   }
 
@@ -516,7 +557,9 @@ export class GameView {
    * фона (верх занят HUD, верхний угол часто за краем из-за cover).
    */
   private placeWorldLabel(): void {
-    const text = `5 · ФОН · ${SCENE_GROUPS.world.w}×${SCENE_GROUPS.world.h}`;
+    // Бокс в подписи — от сцены: у квартиры свой бокс (world_home).
+    const spec = SCENE_GROUPS[backgroundGroup(this.currentScene)];
+    const text = `5 · ФОН · ${spec.w}×${spec.h}`;
     if (!this.worldLabel) {
       this.worldLabel = new Text({ text, style: this.markerStyle() });
       this.worldLabel.anchor.set(0, 1);
@@ -563,33 +606,82 @@ export class GameView {
     return Math.round(topFree + usable * CY_FRAC);
   }
 
+  // ----------------------------------------------------------------- сцены
+
+  /** Текущая сцена (её корень виден). */
+  get scene(): SceneKind {
+    return this.currentScene;
+  }
+
   /**
-   * Применить ФОН ЛОКАЦИИ (зовёт main при 'location:changed' и один раз на
-   * старте). Ключ — ТОЧНЫЙ world/<index> локации: без отката стадий вниз,
-   * чужой фон не подмазываем (нет ассета — заглушка). Пока новая текстура
-   * грузится — на экране текущая или заглушка; после подмены прошлый фон
-   * освобождается (если это BG-видео, это живой видеодекодер).
+   * ПЕРЕКЛЮЧИТЬ СЦЕНУ (улица ↔ дом). Прокачка общая — меняются только МЕСТА
+   * объектов: скрывается один корневой контейнер, показывается другой, плюс
+   * подмена фона (у каждой сцены свой ключ и свой бокс заглушки).
+   * Игрок с носимыми лежит ПОВЕРХ корней и виден в обеих сценах без правок.
    */
-  applyLocation(location: number): void {
+  setScene(scene: SceneKind): void {
+    if (this.currentScene === scene) return;
+    this.currentScene = scene;
+
+    this.streetRoot.visible = scene === 'street';
+    this.homeRoot.visible = scene === 'home';
+    // Корни включаются, а видимость КОНКРЕТНЫХ узлов ставит applySceneState
+    // (см. ниже): рабочие узлы показываются только дома.
+
+    // Заглушка фона: бокс/цвет другой сцены; текстуру сменит applySceneBackground.
+    this.world.setScene(scene);
+    if (this.lastLocation >= 0) this.applySceneBackground(this.lastLocation);
+    this.placeWorldLabel();
+
+    // Видимость узлов зависит от сцены (рабочее место живёт только дома) —
+    // перечитываем то же состояние объектов; заодно узлы новой сцены получат
+    // текстуры, если они уже в кэше реестра.
+    if (this.lastStates) this.applySceneState(this.lastStates);
+  }
+
+  /**
+   * Применить ФОН ТЕКУЩЕЙ СЦЕНЫ для локации (зовёт main при 'location:changed',
+   * при переключении сцены и один раз на старте). Ключ — ТОЧНЫЙ
+   * <группа фона сцены>/<индекс локации> (world/2 — улица, world_home/2 —
+   * квартира): без отката стадий вниз, чужой фон не подмазываем (нет ассета —
+   * заглушка). Пока новая текстура грузится — на экране текущая или заглушка;
+   * после подмены прошлый фон освобождается (BG-видео — живой видеодекодер).
+   */
+  applySceneBackground(location: number): void {
     this.lastLocation = location;
 
-    const key = assetKey(WORLD_ASSET_GROUP, location);
+    const scene = this.currentScene;
+    const key = assetKey(backgroundGroup(scene), location);
+
+    // 1) ЧТО ПОКАЗЫВАЕМ. Ассета нет — заглушка; ассет грузится — на экране
+    // остаётся прежний фон (появившийся позже позовёт onLoaded → refreshTextures).
     if (!this.assets.has(key)) {
-      // Ассета фона локации нет — возвращаем заглушку.
-      if (this.appliedWorldKey) {
-        this.assets.release(this.appliedWorldKey);
-        this.appliedWorldKey = null;
+      if (this.displayedWorldKey !== null) {
+        this.world.setTexture(null);
+        this.displayedWorldKey = null;
       }
-      this.world.setTexture(null);
-      return;
+    } else {
+      const texture = this.assets.texture(key);
+      if (texture && this.displayedWorldKey !== key) {
+        this.world.setTexture(texture);
+        this.displayedWorldKey = key;
+      }
+      if (this.displayedWorldKey === key) this.heldWorldKey[scene] = key;
     }
 
-    const texture = this.assets.texture(key);
-    if (!texture || this.appliedWorldKey === key) return;
-
-    this.world.setTexture(texture);
-    if (this.appliedWorldKey) this.assets.release(this.appliedWorldKey);
-    this.appliedWorldKey = key;
+    // 2) ОТПУСКАЕМ фон чужой локации (у видео это закрытие декодера), НО только
+    // тот, что НЕ стоит сейчас на экране: destroy текстуры под работающим
+    // спрайтом = чёрный/битый кадр. Висящий на экране отпустит следующий заход
+    // (после подмены фоном новой локации или заглушкой). Фон ДРУГОЙ СЦЕНЫ
+    // текущей локации остаётся: возврат в сцену не тянет и не декодит его заново.
+    for (const heldScene of SCENE_ORDER) {
+      const held = this.heldWorldKey[heldScene];
+      if (!held) continue;
+      if (held === assetKey(backgroundGroup(heldScene), location)) continue;
+      if (held === this.displayedWorldKey) continue;
+      this.assets.release(held);
+      this.heldWorldKey[heldScene] = null;
+    }
   }
 
   // ---------------------------------------------------------------- текстуры
@@ -612,8 +704,8 @@ export class GameView {
     for (const [container, rec] of this.visuals) {
       if (container.visible) this.syncVisual(rec);
     }
-    // До первого applyLocation локация неизвестна — фон не трогаем.
-    if (this.lastLocation >= 0) this.applyLocation(this.lastLocation);
+    // До первого applySceneBackground локация неизвестна — фон не трогаем.
+    if (this.lastLocation >= 0) this.applySceneBackground(this.lastLocation);
   }
 
   /** Запомнить запрошенную стадию узла и сразу попробовать подменить текстуру. */
@@ -633,7 +725,9 @@ export class GameView {
    */
   private syncVisual(rec: RectVisual): void {
     if (rec.stage < 0) return; // стадия ещё не задана состоянием сцены
-    const key = this.assets.resolveKey(rec.spec.group, rec.stage);
+    // Группа ассета — из СЦЕНЫ, в которой объект живёт (id → группа этой сцены).
+    const group = assetGroupOf(rec.spec.id, this.currentScene) ?? rec.spec.group;
+    const key = this.assets.resolveKey(group, rec.stage);
     if (!key) {
       if (rec.appliedKey) this.showPlaceholder(rec);
       return;
@@ -669,6 +763,19 @@ export class GameView {
     rec.label.visible = this.labelsForced;
   }
 
+  /**
+   * Узел сцены по id объекта (мебель/камера/комп — в домашнем корне, носимые —
+   * дети игрока). Возвращает и признак видимости: рабочие узлы показываются
+   * только в своей сцене (носимые видны всегда — они дети игрока).
+   */
+  private sceneNode(id: ObjectId): { node: Container; inScene: boolean } | null {
+    const workplaceNode = this.workplace.get(id);
+    if (workplaceNode) return { node: workplaceNode, inScene: this.currentScene === 'home' };
+    const wornNode = this.worn.get(id);
+    if (wornNode) return { node: wornNode, inScene: true };
+    return null;
+  }
+
   // ------------------------------------------------------------ тиры сцены
 
   // ------------------------------------------------------------ тиры сцены
@@ -679,6 +786,8 @@ export class GameView {
    * (перекраски-тинты убраны до текстур). Меняется только владение (visible).
    */
   applySceneState(states: SceneObjectInfo[]): void {
+    this.lastStates = states;
+
     for (const s of states) {
       switch (s.id) {
         case 'house':
@@ -697,13 +806,15 @@ export class GameView {
             if (s.owned) this.setStage(this.yard, s.tier);
           }
           break;
+        // Рабочее место живёт в ДОМАШНЕЙ сцене: на улице узлы скрыты целиком
+        // (иначе покупка «просвечивала» бы сквозь уличную композицию).
         case 'camera':
         case 'pc':
         case 'furniture': {
-          const item = this.workplace.get(s.id);
-          if (item) {
-            item.visible = s.owned;
-            if (s.owned) this.setStage(item, s.tier);
+          const found = this.sceneNode(s.id);
+          if (found) {
+            found.node.visible = s.owned && found.inScene;
+            if (s.owned) this.setStage(found.node, s.tier);
           }
           break;
         }

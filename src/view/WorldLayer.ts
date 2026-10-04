@@ -1,5 +1,6 @@
 import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { SCENE_GROUPS } from '@data/assets';
+import type { SceneKind } from '@data/assets';
 
 /**
  * ЗАДНИЙ СЛОЙ МИРА — «Фон» (объект 5 на чертеже).
@@ -13,17 +14,31 @@ import { SCENE_GROUPS } from '@data/assets';
  * sceneAssets.json — только номинальный кадр и заглушка; аспект мастера
  * world/0 = 1.475 совпадает с ним).
  *
- * Текстуру ставит GameView.applyLocation по манифесту (setTexture(null) —
+ * Текстуру ставит GameView.applySceneBackground по манифесту (setTexture(null) —
  * вернуть заглушку). Слою безразлично, картинка это или видео: и то и другое
- * приходит сюда как Texture. Мировые эпохи: world/<эпоха>.
+ * приходит сюда как Texture. Ключи фона: world/<локация> (улица) и
+ * world_home/<локация> (квартира).
+ *
+ * Заглушка знает про СЦЕНУ: у улицы и квартиры разные размеры бокса и цвета
+ * (синий/тёплый), поэтому setScene(scene) перенастраивает прямоугольник и
+ * повторно центрует фон (без текстуры cover считался бы по чужому боксу).
  */
 
 /** Номинальный эталон фона (размер бокса из паспорта ассетов, px). */
 export const WORLD_REF_W = SCENE_GROUPS.world.w;
 export const WORLD_REF_H = SCENE_GROUPS.world.h;
 
-/** Цвет прямоугольника фона — синий «задний слой» с чертежа. */
-const BG_COLOR = 0x3f6f8f;
+/** Цвета прямоугольников-заглушек фона: улица — синий, квартира — тёплый. */
+const BG_COLOR: Record<SceneKind, number> = {
+  street: 0x3f6f8f,
+  home: 0x8f6f3f,
+};
+
+/** Бокс заглушки фона для сцены (у каждой сцены свой размер из паспорта). */
+const bgBox = (scene: SceneKind): { w: number; h: number } => {
+  const spec = scene === 'home' ? SCENE_GROUPS.world_home : SCENE_GROUPS.world;
+  return { w: spec.w, h: spec.h };
+};
 
 export class WorldLayer {
   readonly root = new Container();
@@ -34,26 +49,50 @@ export class WorldLayer {
   /** Спрайт текстуры фона (картинка или видео). */
   private sprite = new Sprite();
 
-  /** Размер текущего контента: эталон или фактическая текстура. */
+  /** Размер текущего контента: эталон сцены или фактическая текстура. */
   private contentW = WORLD_REF_W;
   private contentH = WORLD_REF_H;
+  /** Текущая сцена — от неё зависят бокс и цвет заглушки. */
+  private scene: SceneKind = 'street';
   /** Последний экран — чтобы пересчитать cover при подмене текстуры. */
   private screenW = 0;
   private screenH = 0;
 
   constructor() {
-    this.placeholder
-      .rect(-WORLD_REF_W / 2, -WORLD_REF_H / 2, WORLD_REF_W, WORLD_REF_H)
-      .fill({ color: BG_COLOR, alpha: 0.55 });
-    this.placeholder
-      .rect(-WORLD_REF_W / 2, -WORLD_REF_H / 2, WORLD_REF_W, WORLD_REF_H)
-      .stroke({ width: 3, color: BG_COLOR });
-
     this.sprite.anchor.set(0.5);
     this.sprite.visible = false;
 
     this.holder.addChild(this.placeholder, this.sprite);
     this.root.addChild(this.holder);
+
+    this.drawPlaceholder();
+  }
+
+  /** Перерисовать прямоугольник заглушки под текущую сцену (бокс + цвет). */
+  private drawPlaceholder(): void {
+    const { w, h } = bgBox(this.scene);
+    const color = BG_COLOR[this.scene];
+
+    this.placeholder.clear();
+    this.placeholder.rect(-w / 2, -h / 2, w, h).fill({ color, alpha: 0.55 });
+    this.placeholder.rect(-w / 2, -h / 2, w, h).stroke({ width: 3, color });
+  }
+
+  /**
+   * Сменить сцену фона: у квартиры другой бокс и цвет заглушки. Текстуру
+   * (если она уже стоит) не трогаем — GameView сам применит нужный ключ, а до
+   * этого момента экран закрывает прежний фон (он больше размером).
+   */
+  setScene(scene: SceneKind): void {
+    if (this.scene === scene) return;
+    this.scene = scene;
+    this.drawPlaceholder();
+    if (!this.sprite.visible) {
+      const box = bgBox(scene);
+      this.contentW = box.w;
+      this.contentH = box.h;
+    }
+    this.layout(this.screenW, this.screenH);
   }
 
   /**
@@ -76,9 +115,10 @@ export class WorldLayer {
       this.sprite.visible = true;
       this.placeholder.visible = false;
     } else {
+      const box = bgBox(this.scene);
       this.sprite.texture = Texture.EMPTY;
-      this.contentW = WORLD_REF_W;
-      this.contentH = WORLD_REF_H;
+      this.contentW = box.w;
+      this.contentH = box.h;
       this.sprite.visible = false;
       this.placeholder.visible = true;
     }

@@ -678,6 +678,51 @@ button.sub-cell {
   transform: translateY(1px);
 }
 
+/* ================= КНОПКА ПЕРЕХОДА МЕЖДУ СЦЕНАМИ ================= */
+
+/*
+ * Вертикальная пилюля у ПРАВОГО края, над таб-баром (решение владельца
+ * 2026-10-04: кнопка сбоку). Тот же материал, что у плашек HUD (--bg-panel +
+ * рамка 8%), вертикальная раскладка: иконка сверху, подпись снизу —
+ * помещается в узкую полосу сбоку от меню. Подпись — сцена-ЦЕЛЬ перехода.
+ */
+.scene-btn {
+  position: absolute;
+  right: 8px;
+  /* 14px, а не 10px: --tabbar-h — номинальная высота панели, а на узком
+     экране подписи вкладок переносятся и панель выше номинала — с 10px кнопка
+     на 1px залезала на вкладки (замер 375×667). */
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 14px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 12; /* над холстом, рядом с HUD/шторкой */
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  transition: transform 0.14s ease;
+}
+
+.scene-btn .scene-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.scene-btn:active {
+  transform: scale(0.94);
+}
+
 /* ================= ВЫНОСКА ПОКУПОК ================= */
 
 /*
@@ -689,6 +734,10 @@ button.sub-cell {
  */
 .sheet {
   position: absolute;
+  /* 14: выше кнопки сцен (12) и кольца, ниже попапа локаций (15). Открытая
+     выноска накрывает кнопку сцен (на узком экране она во всю ширину) —
+     висящая поверх магазина кнопка была бы лишним интерактивом. */
+  z-index: 14;
   left: 50%;
   bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 10px); /* зазор над меню (с учётом safe-area реальной высоты панели) */
   transform: translateX(-50%) scale(0.96);

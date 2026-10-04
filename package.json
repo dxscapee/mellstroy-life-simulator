@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "assets": "node scripts/build-assets.mjs",
+    "assets:prune": "node scripts/build-assets.mjs --prune",
     "assets:watch": "node scripts/build-assets.mjs --watch"
   },
   "dependencies": {

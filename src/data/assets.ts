@@ -14,6 +14,10 @@
  * Размеры w×h здесь — ИСТИННЫЕ габариты текстуры (= габариты прямоугольника
  * сцены). Раскладка позиций живёт в GameView; этот файл отвечает только за
  * размеры, папки, число стадий и бюджет веса.
+ *
+ * СЦЕНЫ: у каждого объекта сцены группа ассетов зависит от СЦЕНЫ (улица/дом) —
+ * см. SCENE_OBJECT_GROUPS/assetGroupOf; фон у каждой сцены свой
+ * (backgroundGroup). Прокачка при этом общая: сцена меняет только адрес ассета.
  */
 
 import type { ObjectId } from '@engine/types';
@@ -45,30 +49,76 @@ export interface SceneGroupSpec {
 /** Спеки всех групп (типизированы ключами из sceneAssets.json). */
 export const SCENE_GROUPS: Record<AssetGroup, SceneGroupSpec> = sceneAssets.groups;
 
+// ==================== СЦЕНЫ (локации мира) ====================
+
 /**
- * ObjectId → группа ассетов. Таблица намеренно типизирована (Partial<Record<ObjectId, …>>):
- * опечатка в id не соберётся. Объекты без пресета на сцене (навыки) сюда не входят.
+ * СЦЕНА — часть мира, между которыми игрок переключается кнопкой.
+ * Прокачка общая: делятся только МЕСТА объектов, не их уровни.
+ *  · 'street' — улица: фон улицы, двор, дом, машина, игрок;
+ *  · 'home'   — дом/квартира: фон квартиры, игрок и рабочее место.
+ * Игрок (тело + носимые) живёт в ОБЕИХ сценах.
  */
-export const OBJECT_ASSET_GROUP: Partial<Record<ObjectId, AssetGroup>> = {
-  bg: 'yard',
-  house: 'house',
-  car: 'car',
-  hair: 'hair',
-  clothes: 'clothes',
-  watch: 'watch',
-  furniture: 'furniture',
-  camera: 'camera',
-  pc: 'pc',
+export type SceneKind = 'street' | 'home';
+
+/** Порядок сцен в кнопке перехода (и порядок вкладок-состояний). */
+export const SCENE_ORDER: readonly SceneKind[] = ['street', 'home'];
+
+/** Подпись и иконка сцены для кнопки перехода в UI. */
+export const SCENE_META: Record<SceneKind, { label: string; icon: string }> = {
+  street: { label: 'Улица', icon: '🌆' },
+  home: { label: 'Дом', icon: '🏠' },
 };
 
-/** Группа ассета для объекта сцены (null — объект не рисуется). */
-export const assetGroupOf = (id: ObjectId): AssetGroup | null => OBJECT_ASSET_GROUP[id] ?? null;
+/**
+ * Группы СЦЕНОВЫХ объектов по сценам. Навыки на сцене не рисуются — их нет нигде.
+ * Объект живёт РОВНО в одной сцене (рабочее место — в домашней), игрок — в обеих
+ * (см. CHARACTER_ASSET_GROUP ниже).
+ */
+export const SCENE_OBJECT_GROUPS: Record<SceneKind, Partial<Record<ObjectId, AssetGroup>>> = {
+  street: {
+    bg: 'yard',
+    house: 'house',
+    car: 'car',
+    hair: 'hair',
+    clothes: 'clothes',
+    watch: 'watch',
+  },
+  home: {
+    furniture: 'furniture_home',
+    camera: 'camera_home',
+    pc: 'pc_home',
+    hair: 'hair',
+    clothes: 'clothes',
+    watch: 'watch',
+  },
+};
+
+/**
+ * Группа ассета объекта в конкретной сцене (null — объекта в этой сцене нет).
+ * Вторая таблица намеренно НЕ вводится: сцена — часть адреса ассета, а не
+ * отдельная сущность в data/objects.ts (там по-прежнему одна запись на объект).
+ */
+export const assetGroupOf = (id: ObjectId, scene: SceneKind): AssetGroup | null =>
+  SCENE_OBJECT_GROUPS[scene][id] ?? null;
+
+/** Есть ли объект на сцене хотя бы одной из сцен (для стартового прелоада). */
+export const isSceneObject = (id: ObjectId): boolean =>
+  SCENE_ORDER.some((scene) => assetGroupOf(id, scene) !== null);
 
 /** Ключ ассета в манифесте: «группа/стадия» (например, world/3 — фон локации №4). */
 export const assetKey = (group: AssetGroup, stage: number): string => `${group}/${stage}`;
 
-/** Группа фона: ключ локации — assetKey(WORLD_ASSET_GROUP, locationIndex). */
-export const WORLD_ASSET_GROUP: AssetGroup = 'world';
+/**
+ * Группа фона КАЖДОЙ сцены: ключ фона = assetKey(backgroundGroup(scene), индекс
+ * локации). Улица — world/<index>, квартира — world_home/<index>.
+ */
+export const SCENE_BACKGROUND_GROUP: Record<SceneKind, AssetGroup> = {
+  street: 'world',
+  home: 'world_home',
+};
+
+/** Группа фона для сцены (data-функция вместо константы: сцен стало две). */
+export const backgroundGroup = (scene: SceneKind): AssetGroup => SCENE_BACKGROUND_GROUP[scene];
 
 /** Группа постоянного тела игрока (без стадий). */
 export const CHARACTER_ASSET_GROUP: AssetGroup = 'character';

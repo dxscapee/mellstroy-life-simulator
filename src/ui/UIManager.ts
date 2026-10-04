@@ -1,11 +1,13 @@
 import { events } from '@engine/eventBus';
 import { formatCount, formatMoney, formatIncomePerSecond } from '@engine/format';
 import { LOCATIONS } from '@data/locations';
+import type { SceneKind } from '@data/assets';
 import type { Game } from '@engine/Game';
 import { Modal } from './OfflineModal';
 import { ObjectSheet } from './ObjectSheet';
 import { LocationPopup } from './LocationPopup';
 import type { LocationPreviewProvider } from './LocationPopup';
+import { SceneButton } from './SceneButton';
 
 /** Геометрия кольца прогресса мира (viewBox 60×60). */
 const WORLD_RING_R = 26;
@@ -38,6 +40,8 @@ export class UIManager {
   private subGoalEl: HTMLElement;
   /** Попап локаций (карусель из 5): открывается кольцом прогресса. */
   private locPopup: LocationPopup;
+  /** Кнопка перехода между сценами (улица ↔ дом) — сбоку справа. */
+  private sceneButton: SceneButton | null = null;
   /** Кольцо прогресса локации (слева сверху) + его SVG-дуга и % внутри. */
   private worldRing: HTMLButtonElement;
   private worldRingFg: SVGCircleElement;
@@ -62,6 +66,12 @@ export class UIManager {
      * поэтому ui остаётся в стороне от view (только данные, без импорта слоя).
      */
     locPreview?: LocationPreviewProvider,
+    /**
+     * Провайдер ТЕКУЩЕЙ сцены и переключатель сцен — тоже от main (ui не знает
+     * про GameView): кнопка сцен читает сцену у сцены и просит её переключить.
+     */
+    sceneProvider?: () => SceneKind,
+    sceneSwitch?: (scene: SceneKind) => void,
   ) {
     this.worldRingC = 2 * Math.PI * WORLD_RING_R;
     // Попап локаций открывается кольцом прогресса (см. ниже) — бывшая
@@ -173,6 +183,15 @@ export class UIManager {
     this.worldRing.addEventListener('click', () => this.locPopup.toggle());
     bar.appendChild(this.worldRing); // прикреплено к ЛЕВОМУ краю блока плашек
     uiRoot.appendChild(bar);
+
+    // Кнопка перехода между сценами — отдельный виджет сбоку (не в блоке
+    // плашек): текущая сцена живёт в view, поэтому UI получает её провайдером.
+    this.sceneButton = new SceneButton(
+      uiRoot,
+      () => sceneProvider?.() ?? 'street',
+      (scene) => sceneSwitch?.(scene),
+      (listener) => events.on('scene:changed', listener),
+    );
 
     this.sheet = new ObjectSheet(uiRoot, game);
     this.modal = new Modal(uiRoot);
@@ -338,5 +357,7 @@ export class UIManager {
   destroy(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers = [];
+    this.sceneButton?.destroy();
+    this.sceneButton = null;
   }
 }

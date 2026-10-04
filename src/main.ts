@@ -8,10 +8,12 @@ import { buildSceneState } from '@data/objects';
 import {
   assetGroupOf,
   assetKey,
+  backgroundGroup,
+  SCENE_ORDER,
   CHARACTER_ASSET_GROUP,
   CHARACTER_ASSET_STAGE,
-  WORLD_ASSET_GROUP,
 } from '@data/assets';
+import type { SceneKind } from '@data/assets';
 import { GameView } from '@view/GameView';
 import { AssetRegistry } from '@view/assetRegistry';
 import { UIManager } from '@ui/UIManager';
@@ -25,11 +27,13 @@ let game: Game | null = null;
 let scene: GameView | null = null;
 
 /**
- * Ключи стартового набора: фон ТЕКУЩЕЙ ЛОКАЦИИ (world/<index>, только точный
- * ключ — чужой фон не подмазываем), тело игрока и текстуры всех купленных
- * сценовых объектов на их текущих стадиях. Ключи резолвятся реестром (с откатом
- * вниз), поэтому грузим ИМЕННО то, что будет показано. Это происходит до
- * LoadingAPI.ready() (загрузочный экран); остальное — лениво.
+ * Ключи стартового набора: фоны ОБЕИХ СЦЕН текущей локации (world/<index> —
+ * улица, world_home/<index> — квартира, только точные ключи — чужой фон не
+ * подмазываем), тело игрока и текстуры всех купленных сценовых объектов на их
+ * текущих стадиях. Грузим сразу обе сцены, чтобы переход кнопкой не ждал
+ * загрузки. Ключи резолвятся реестром (с откатом вниз), поэтому грузим ИМЕННО
+ * то, что будет показано. Это происходит до LoadingAPI.ready() (загрузочный
+ * экран); остальное — лениво.
  */
 function startupAssetKeys(assets: AssetRegistry): string[] {
   if (!game) return [];
@@ -38,15 +42,20 @@ function startupAssetKeys(assets: AssetRegistry): string[] {
   const characterKey = assets.resolveKey(CHARACTER_ASSET_GROUP, CHARACTER_ASSET_STAGE);
   if (characterKey) keys.push(characterKey);
 
-  const worldKey = assetKey(WORLD_ASSET_GROUP, game.state.location);
-  if (assets.has(worldKey)) keys.push(worldKey);
+  for (const scene of SCENE_ORDER) {
+    const worldKey = assetKey(backgroundGroup(scene), game.state.location);
+    if (assets.has(worldKey)) keys.push(worldKey);
+  }
 
   for (const state of buildSceneState()) {
     if (!state.owned) continue;
-    const group = assetGroupOf(state.id);
-    if (!group) continue;
-    const key = assets.resolveKey(group, state.tier);
-    if (key) keys.push(key);
+    // Объект может жить в любой из сцен (улица/дом) — грузим его группу во всех.
+    for (const scene of SCENE_ORDER) {
+      const group = assetGroupOf(state.id, scene);
+      if (!group) continue;
+      const key = assets.resolveKey(group, state.tier);
+      if (key) keys.push(key);
+    }
   }
   return keys;
 }
@@ -80,16 +89,28 @@ async function bootstrap(): Promise<void> {
   // Массовые изменения (applyLevels из дебага, загрузка сейва) — сцена перечитывает всё.
   events.on('objects:changed', refreshScene);
 
-  // Локация: фон применяется и на старте, и при переходе (событие location:changed).
-  view.applyLocation(game.state.location);
-  events.on('location:changed', ({ location }) => view.applyLocation(location));
+  // Локация: фон ТЕКУЩЕЙ сцены применяется и на старте, и при переходе
+  // (событие location:changed — локация общая для обеих сцен).
+  view.applySceneBackground(game.state.location);
+  events.on('location:changed', ({ location }) => view.applySceneBackground(location));
 
   // 4) Слой UI. Превью локаций для попапа: URL фона из манифеста (ui про view не знает).
-  const ui = new UIManager(uiRoot, game, (location) => {
-    const key = assetKey(WORLD_ASSET_GROUP, location);
-    const entry = assets.has(key) ? assets.entry(key) : null;
-    return entry ? { url: entry.url, kind: entry.type } : null;
-  });
+  const ui = new UIManager(
+    uiRoot,
+    game,
+    (location) => {
+      const key = assetKey(backgroundGroup('street'), location);
+      const entry = assets.has(key) ? assets.entry(key) : null;
+      return entry ? { url: entry.url, kind: entry.type } : null;
+    },
+    // Кнопка сцен: ui читает текущую сцену у view и просит её переключить
+    // (направление зависимостей сохраняется — связывает их main).
+    () => view.scene,
+    (scene: SceneKind) => {
+      view.setScene(scene);
+      events.emit('scene:changed', { scene });
+    },
+  );
 
   // Офлайн-модалка: подписка на будущее + учёт уже случившегося (событие
   // эмитится из конструктора Game раньше, чем UI успел подписаться).

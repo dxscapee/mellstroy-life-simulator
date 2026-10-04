@@ -1,37 +1,53 @@
 {
   "version": 1,
   "assets": {
+    "car/0": {
+      "url": "assets/car/0.a67bb5f1.webp",
+      "type": "image",
+      "w": 704,
+      "h": 480,
+      "bytes": 48026,
+      "source": "art/car/0.png"
+    },
+    "car/1": {
+      "url": "assets/car/1.7674c33f.webp",
+      "type": "image",
+      "w": 704,
+      "h": 480,
+      "bytes": 38226,
+      "source": "art/car/1.png"
+    },
+    "car/2": {
+      "url": "assets/car/2.f41fc13f.webp",
+      "type": "image",
+      "w": 704,
+      "h": 480,
+      "bytes": 34346,
+      "source": "art/car/2.png"
+    },
     "character/0": {
-      "url": "assets/character/0.f66d604f.webp",
+      "url": "assets/character/0.a6fca959.webp",
       "type": "image",
       "w": 528,
       "h": 1104,
-      "bytes": 81246,
+      "bytes": 54046,
       "source": "art/character/0.png"
     },
+    "house/0": {
+      "url": "assets/house/0.42492845.webp",
+      "type": "image",
+      "w": 768,
+      "h": 1280,
+      "bytes": 82068,
+      "source": "art/house/0.png"
+    },
     "world/0": {
-      "url": "assets/world/0.8d5d6a91.webp",
-      "type": "image",
-      "w": 1505,
-      "h": 1020,
-      "bytes": 47640,
-      "source": "art/world/0.png"
-    },
-    "world/1": {
-      "url": "assets/world/1.17b87bc2.webp",
-      "type": "image",
-      "w": 2240,
-      "h": 1254,
-      "bytes": 387334,
-      "source": "art/world/1.jpg"
-    },
-    "world/2": {
-      "url": "assets/world/2.7155011b.webp",
+      "url": "assets/world/0.c7f5303f.webp",
       "type": "image",
       "w": 2240,
       "h": 1518,
-      "bytes": 595994,
-      "source": "art/world/2.png"
+      "bytes": 264022,
+      "source": "art/world/0.png"
     }
   }
 }

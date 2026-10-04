@@ -113,4 +113,10 @@ export type GameEventMap = {
   'objects:changed': undefined;
   /** Игрок перешёл на другую локацию (или сброс): фон сцены + подпись кольца. */
   'location:changed': { location: number };
+  /**
+   * Игрок перешёл в другую СЦЕНУ (улица ↔ дом). Прокачка общая — меняется
+   * только видимый набор объектов и фон (см. view/GameView.setScene).
+   * Живёт в сессии: в сейв сцена не пишется (старт всегда с улицы).
+   */
+  'scene:changed': { scene: string };
 };

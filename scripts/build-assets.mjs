@@ -180,11 +180,26 @@ function scanMasters(config, warnings, errors) {
   }
 
   // Три слоя рабочего места обязаны быть конгруэнтны (на них держится стопка).
-  const trio = ['furniture', 'camera', 'pc'];
-  if (trio.every((g) => config.groups[g])) {
+  // Проверяем ОБА комплекта: улица (furniture/camera/pc — задел под уличную
+  // версию рабочего места) и дом (furniture_home/camera_home/pc_home — его
+  // рисует домашняя сцена, см. data/assets.ts SCENE_OBJECT_GROUPS).
+  for (const trio of [
+    ['furniture', 'camera', 'pc'],
+    ['furniture_home', 'camera_home', 'pc_home'],
+  ]) {
+    if (!trio.every((g) => config.groups[g])) continue;
     const [a, b, c] = trio.map((g) => `${config.groups[g].w}×${config.groups[g].h}`);
     if (!(a === b && b === c)) {
-      errors.push(`furniture/tech/pc должны иметь одинаковый размер (сейчас ${a}, ${b}, ${c}).`);
+      errors.push(`${trio.join('/')} должны иметь одинаковый размер (сейчас ${a}, ${b}, ${c}).`);
+    }
+  }
+
+  // Фоны сцен конгруэнтны: улица и квартира — один кадр (cover-логика общая).
+  if (config.groups.world && config.groups.world_home) {
+    const a = `${config.groups.world.w}×${config.groups.world.h}`;
+    const b = `${config.groups.world_home.w}×${config.groups.world_home.h}`;
+    if (a !== b) {
+      errors.push(`world и world_home должны иметь одинаковый размер (сейчас ${a} и ${b}).`);
     }
   }
 
@@ -198,7 +213,15 @@ function scanMasters(config, warnings, errors) {
  * Модуль не бросает исключения наружу: всё уходит в warnings/errors,
  * а результат описывается объектом { ok, changed, ... }.
  */
-export async function buildAssets({ quiet = false } = {}) {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.quiet] — без отчёта (dev-плагин).
+ * @param {boolean} [options.prune] — прибирать и группы БЕЗ локальных мастеров
+ *   (npm run assets:prune). По умолчанию такие группы — no-op: их готовые ассеты
+ *   и записи манифеста сохраняются, чтобы прогон у второго разработчика (у него
+ *   нет чужих мастеров) не стёр закоммиченные текстуры.
+ */
+export async function buildAssets({ quiet = false, prune = false } = {}) {
   const warnings = [];
   const errors = [];
   const notes = [];
@@ -229,12 +252,49 @@ export async function buildAssets({ quiet = false } = {}) {
     return { ok: false, changed: false, warnings, errors };
   }
 
+  const manifestPath = join(outRoot, 'manifest.json');
   const manifest = { version: MANIFEST_VERSION, assets: {} };
   const rows = [];
   /** Файлы, которые не удалось удалить (заняты на Windows и т.п.). */
   const leftovers = [];
+  /** Группы, у которых локально нет мастеров: их готовые ассеты мы сохранили. */
+  const carriedGroups = [];
+
+  // Прошлый манифест: нужен, чтобы ПЕРЕНЕСТИ записи групп без локальных
+  // мастеров (см. охрану в цикле). Битый/отсутствующий — просто нет переноса.
+  let previousManifest = null;
+  try {
+    previousManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch {
+    previousManifest = null;
+  }
 
   for (const { group, spec, srcDir, byStage } of plan) {
+    // ГРУППА БЕЗ ЛОКАЛЬНЫХ МАСТЕРОВ (клон репозитория у второго разработчика,
+    // свежая ветка, art/ ещё не разложен) — НЕ ТРОГАЕМ ЕЁ ВООБЩЕ: ни файлы, ни
+    // записи манифеста. Иначе прогон у того, у кого нет art/, стирал бы уже
+    // собранные и закоммиченные текстуры и обнулял манифест (проверено на живом
+    // репозитории: манифест схлопывался в пустой, файлы спасала только блокировка
+    // dev-сервером). Записи переносим как есть — прогон получается no-op.
+    if (byStage.size === 0 && !prune) {
+      const carried = Object.entries(previousManifest?.assets ?? {}).filter(([key]) =>
+        key.startsWith(`${group}/`),
+      );
+      if (carried.length === 0) continue;
+
+      for (const [key, entry] of carried) {
+        manifest.assets[key] = entry;
+        rows.push({
+          key,
+          type: entry.type === 'video' ? 'видео' : 'картинка',
+          dims: entry.w && entry.h ? `${entry.w}×${entry.h}` : '—',
+          bytes: entry.bytes ?? 0,
+          source: `${entry.source ?? '—'} (сохранён)`,
+        });
+      }
+      carriedGroups.push(`${group} (${carried.length})`);
+      continue;
+    }
     // Папку группы создаём лениво: пустые папки в dist и в архиве площадки
     // не нужны (структура видна в art/, а игра читает манифест).
     const outDir = join(outRoot, group);
@@ -375,12 +435,17 @@ export async function buildAssets({ quiet = false } = {}) {
     }
   }
 
+  if (carriedGroups.length > 0) {
+    notes.push(
+      `группы без мастеров в art/: ${carriedGroups.join(', ')} — готовые ассеты и записи манифеста сохранены как есть`,
+    );
+  }
+
   // Манифест: стабильный порядок ключей, запись только при изменениях.
   const sortedAssets = Object.fromEntries(
     Object.entries(manifest.assets).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
   );
   const manifestText = `${JSON.stringify({ version: MANIFEST_VERSION, assets: sortedAssets }, null, 2)}\n`;
-  const manifestPath = join(outRoot, 'manifest.json');
   const previousText = existsSync(manifestPath) ? readFileSync(manifestPath, 'utf8') : '';
   if (previousText !== manifestText) {
     writeFileSync(manifestPath, manifestText);
@@ -484,7 +549,8 @@ async function runWatchMode() {
 
 async function cli() {
   const watchMode = process.argv.includes('--watch');
-  const result = await buildAssets({ quiet: false });
+  const prune = process.argv.includes('--prune');
+  const result = await buildAssets({ quiet: false, prune });
 
   if (watchMode) {
     await runWatchMode();
