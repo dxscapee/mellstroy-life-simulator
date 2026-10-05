@@ -5,6 +5,7 @@ import type { GameView } from '@view/GameView';
 import { gameConfig } from '@data/gameConfig';
 import { objectDefs } from '@data/objects';
 import { formatNumber } from '@engine/format';
+import { events } from '@engine/eventBus';
 
 /**
  * ДЕБАГ-ПАНЕЛЬ (только для dev).
@@ -130,6 +131,28 @@ export function setupDebugPanel(game: Game, scene: GameView): void {
   });
   undoBtn.disabled = true;
   refreshUndoButton();
+
+  // ПОКУПКИ ИЗ ИГРЫ (карточки выноски) — каждая ОТДЕЛЬНЫМ шагом отмены
+  // (запрос владельца 2026-10-05: «кнопка отмена могла отменять покупки в игре,
+  // и они считались как отдельное действие»). Ядро шлёт событие ПОСЛЕ списания
+  // с прошлым уровнем и суммой — панель складывает откат в тот же LIFO-стек,
+  // что и свои действия: «↩» снимает ПОСЛЕДНЕЕ по одному (покупка или своё).
+  // Откат: уровни — applyLevels по ОДНОМУ объекту (снимок остальных берём
+  // текущий — по LIFO более поздние действия уже откатили), деньги — возврат
+  // ровно списанной суммы (доход с момента покупки не трогаем).
+  events.on('object:purchased', ({ def, prevLevel, cost }) => {
+    const count = def.currentLevel - prevLevel;
+    pushUndo(`покупка: ${def.name}`, () => {
+      const levels: Record<string, number> = {};
+      for (const o of objectDefs) levels[o.id] = o.currentLevel;
+      levels[def.id] = prevLevel;
+      game.state.applyLevels(levels);
+      game.state.money = game.state.money.add(cost);
+      game.refreshAfterDebug();
+      log(`Откат покупки: ${def.name} → ур. ${prevLevel}, +${formatNumber(cost)}$`, 'ok');
+    });
+    log(`Покупка: ${def.name} +${count} ур. −${formatNumber(cost)}$ (отменяемо)`, 'ok');
+  });
 
   // ============ +1 lvl (полная ширина) ============
   const lvlAllBtn = mkBtn('+1 lvl всем', () => {
