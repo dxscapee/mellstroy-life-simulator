@@ -105,6 +105,12 @@ export type GameEventMap = {
   'tap:earned': { amount: Decimal; totalTaps: number };
   /** Уровень любого объекта вырос (включая первую покупку-«анлок»). */
   'object:levelup': ObjectDef;
+  /**
+   * Покупка СОСТОЯЛАСЬ (после списания) — каждая = ОТДЕЛЬНОЕ действие
+   * в undo-стеке дебаг-панели: prevLevel и cost позволяют откатить
+   * ровно эту покупку (запрос владельца 2026-10-05).
+   */
+  'object:purchased': { def: ObjectDef; prevLevel: number; cost: Decimal };
   /** Прогресс подписчиков изменился (тикающий прирост или бонус за клики). */
   'subscribers:changed': undefined;
   /** Цель подписчиков набрана — чип кликабелен за награду. */

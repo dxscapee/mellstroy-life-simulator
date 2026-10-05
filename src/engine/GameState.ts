@@ -113,10 +113,20 @@ export class GameState {
     return this.location < LOCATIONS.length - 1 && this.locationProgress() >= 1;
   }
 
-  /** Перейти на следующую локацию. false — нельзя (не вкачано или финал). */
+  /**
+   * Перейти на следующую локацию. false — нельзя (не вкачано или финал).
+   * НАГРАДА ЗА ПЕРЕХОД (владелец 2026-10-04): +1 уровень ВСЕМ объектам — на новой
+   * локации игрок стартует с её base (89 → 90), а не остаётся на прошлом капе.
+   * Кэши потоков пересчитываются, сцена/HUD перечитывают уровни (objects:changed).
+   */
   advanceLocation(): boolean {
     if (!this.canAdvanceLocation()) return false;
     this.location += 1;
+    for (const o of objectDefs) {
+      o.currentLevel = Math.min(o.maxLevel, o.currentLevel + 1);
+    }
+    this.invalidateCaches();
+    events.emit('objects:changed', undefined);
     return true;
   }
 

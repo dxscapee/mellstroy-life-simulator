@@ -134,10 +134,15 @@ export class Game {
     const def = objectById.get(id as ObjectDef['id']);
     if (!def) return null;
 
+    const prevLevel = def.currentLevel;
+    const moneyBefore = this.state.money;
     if (this.state.buyUpgradeBulk(def, mode) <= 0) return null;
 
     events.emit('object:levelup', def);
     events.emit('money:changed', undefined);
+    // Прошлый уровень + списанная сумма — чтобы дебаг-панель откатила
+    // ЭТУ покупку как отдельное действие (см. GameEventMap 'object:purchased').
+    events.emit('object:purchased', { def, prevLevel, cost: moneyBefore.sub(this.state.money) });
     return def;
   }
 

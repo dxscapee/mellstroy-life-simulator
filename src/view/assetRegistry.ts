@@ -17,7 +17,13 @@ import { ASSET_MANIFEST_URL, assetKey } from '@data/assets';
  *  · texture(key) НИКОГДА не ждёт: кэш → Texture, иначе запускает фоновую
  *    загрузку и возвращает null (сцена покажет заглушку, по завершении
  *    сработают слушатели onLoaded);
- *  · release(key) — освободить память (BG-видео прошлой эпохи и т.п.);
+ *  · prefetch(key) — тихая догрузка В КЭШ без подмены спрайтов (сцена просит
+ *    её для следующей стадии объекта, чтобы переход тира был мгновенным);
+ *  · release(key) — освободить память (BG-видео прошлой эпохи и т.п.). Если
+ *    загрузка ЕЩЁ ИДЁТ — она просто доводится до конца и уничтожается по
+ *    приходу (releaseOnArrive): трогать незагруженный ассет в Assets нельзя,
+ *    иначе незавершённый промис разрешается в null и стадия «не приходит»;
+ *  · ошибка загрузки НЕ вечная: ключ молчит FAILED_RETRY_MS, потом пробуем снова;
  *  · манифеста нет — реестр пуст, игра живёт на заглушках, всё тихо (info).
  *
  * Реестр ничего не знает о раскладке и о конкретных объектах: только ключи.
@@ -46,6 +52,9 @@ interface AssetManifestFile {
 /** Потолок ожидания стартового набора: дальше играем с заглушками. */
 const PRELOAD_TIMEOUT_MS = 12_000;
 
+/** Пауза после неудачной загрузки ключа — раньше не пробуем (транзиентный сбой сети). */
+const FAILED_RETRY_MS = 15_000;
+
 /** Больше двух живых видео одновременно — дорого по памяти (предупреждение в dev). */
 const VIDEO_SOFT_LIMIT = 2;
 
@@ -55,7 +64,8 @@ export class AssetRegistry {
   private cache = new Map<string, Texture>();
   private inflight = new Map<string, Promise<Texture | null>>();
   private videos = new Map<string, HTMLVideoElement>();
-  private failed = new Set<string>();
+  /** Ключи с неудачной загрузкой: время попытки (мс) — см. FAILED_RETRY_MS. */
+  private failed = new Map<string, number>();
   private releaseOnArrive = new Set<string>();
   private listeners = new Set<(key: string) => void>();
   private loggedMissing = new Set<string>();
@@ -149,9 +159,35 @@ export class AssetRegistry {
     if (this.destroyed) return null;
     const cached = this.cache.get(key);
     if (cached) return cached;
-    if (this.failed.has(key) || this.inflight.has(key) || !this.entries?.has(key)) return null;
+    if (this.inflight.has(key) || !this.entries?.has(key) || !this.canRetry(key)) return null;
     void this.load(key);
     return null;
+  }
+
+  /**
+   * ТИХАЯ ДОГРУЗКА КЛЮЧА В КЭШ: сцена зовёт её для следующей стадии объекта,
+   * чтобы переход тира не ждал сеть (владелец 2026-10-05). Спрайты не трогаем —
+   * по приходу ассета сработает onLoaded→refreshTextures, если стадия уже нужна.
+   * Видео НЕ префетчим: живой декодер — дорогой ресурс (ASSETS.md §4.3).
+   */
+  prefetch(key: string | null): void {
+    if (!key || this.destroyed) return;
+    const entry = this.entries?.get(key);
+    if (!entry || entry.type !== 'image') return;
+    if (this.cache.has(key) || this.inflight.has(key) || !this.canRetry(key)) return;
+    void this.load(key);
+  }
+
+  /**
+   * Можно ли пробовать загрузку ключа: после ошибки — только спустя паузу
+   * (транзиентный сбой сети не должен «залипать» навсегда).
+   */
+  private canRetry(key: string): boolean {
+    const failedAt = this.failed.get(key);
+    if (failedAt === undefined) return true;
+    if (Date.now() - failedAt < FAILED_RETRY_MS) return false;
+    this.failed.delete(key);
+    return true;
   }
 
   /**
@@ -191,15 +227,22 @@ export class AssetRegistry {
     };
   }
 
-  /** Освободить ассет: текстура уничтожается, видео-элемент удаляется из DOM. */
+  /**
+   * Освободить ассет: текстура уничтожается, видео-элемент удаляется из DOM.
+   * ЕСЛИ ЗАГРУЗКА ЕЩЁ ИДЁТ — не трогаем её (Assets.unload по незагруженному
+   * ключу разрешает незавершённый промис в null: стадия молча «не приезжает»,
+   * а на экране остаётся прошлая текстура — баг «перепутал/долго грузит»).
+   * Пришедший ассет уничтожит arrive-ветка load().
+   */
   release(key: string): void {
-    if (this.inflight.has(key)) this.releaseOnArrive.add(key);
-
     const entry = this.entries?.get(key);
     const texture = this.cache.get(key);
     this.cache.delete(key);
+    this.failed.delete(key); // явный release снимает и метку ошибки
 
-    if (entry?.type === 'image') {
+    if (this.inflight.has(key)) {
+      this.releaseOnArrive.add(key);
+    } else if (texture && entry?.type === 'image') {
       // Assets.unload сам уничтожает и текстуру, и источник.
       void Assets.unload(entry.url);
     } else if (texture) {
@@ -226,7 +269,7 @@ export class AssetRegistry {
     if (pending) return pending;
 
     const entry = this.entries?.get(key);
-    if (!entry || this.failed.has(key) || this.destroyed) return Promise.resolve(null);
+    if (!entry || this.destroyed || !this.canRetry(key)) return Promise.resolve(null);
 
     const promise = this.loadEntry(key, entry)
       .then((texture) => {
@@ -243,7 +286,7 @@ export class AssetRegistry {
       })
       .catch((err) => {
         this.inflight.delete(key);
-        this.failed.add(key);
+        this.failed.set(key, Date.now());
         console.warn(`[assets] не загрузился «${key}» (${entry.url}):`, err?.message ?? err);
         return null;
       });
@@ -279,6 +322,9 @@ export class AssetRegistry {
       'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;z-index:-1;';
     video.src = entry.url;
     document.body.appendChild(video);
+    // Регистрируем элемент ДО загрузки: release() во время загрузки должен
+    // найти его и убрать из DOM (иначе скрытый <video> останется жить).
+    this.videos.set(key, video);
 
     const source = new VideoSource({
       resource: video,
@@ -294,11 +340,10 @@ export class AssetRegistry {
       await source.load();
     } catch (err) {
       texture.destroy(true);
-      video.remove();
+      this.removeVideoElement(key);
       throw err;
     }
 
-    this.videos.set(key, video);
     this.armAutoplayRetry();
 
     if (import.meta.env.DEV && this.videos.size > VIDEO_SOFT_LIMIT) {

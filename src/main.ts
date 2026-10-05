@@ -11,7 +11,6 @@ import {
   backgroundGroup,
   SCENE_ORDER,
   CHARACTER_ASSET_GROUP,
-  CHARACTER_ASSET_STAGE,
 } from '@data/assets';
 import type { SceneKind } from '@data/assets';
 import { GameView } from '@view/GameView';
@@ -29,7 +28,8 @@ let scene: GameView | null = null;
 /**
  * Ключи стартового набора: фоны ОБЕИХ СЦЕН текущей локации (world/<index> —
  * улица, world_home/<index> — квартира, только точные ключи — чужой фон не
- * подмазываем), тело игрока и текстуры всех купленных сценовых объектов на их
+ * подмазываем), тело игрока (скин текущей локации) и текстуры всех купленных сценовых
+ * объектов на их
  * текущих стадиях. Грузим сразу обе сцены, чтобы переход кнопкой не ждал
  * загрузки. Ключи резолвятся реестром (с откатом вниз), поэтому грузим ИМЕННО
  * то, что будет показано. Это происходит до LoadingAPI.ready() (загрузочный
@@ -39,7 +39,7 @@ function startupAssetKeys(assets: AssetRegistry): string[] {
   if (!game) return [];
 
   const keys: string[] = [];
-  const characterKey = assets.resolveKey(CHARACTER_ASSET_GROUP, CHARACTER_ASSET_STAGE);
+  const characterKey = assets.resolveKey(CHARACTER_ASSET_GROUP, game.state.location);
   if (characterKey) keys.push(characterKey);
 
   for (const scene of SCENE_ORDER) {

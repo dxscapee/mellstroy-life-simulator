@@ -5,6 +5,7 @@ import type { GameView } from '@view/GameView';
 import { gameConfig } from '@data/gameConfig';
 import { objectDefs } from '@data/objects';
 import { formatNumber } from '@engine/format';
+import { events } from '@engine/eventBus';
 
 /**
  * ДЕБАГ-ПАНЕЛЬ (только для dev).
@@ -43,8 +44,9 @@ const UNDO_LIMIT = 10;
 
 /**
  * @param game  ядро (деньги/уровни/скорость) — как и раньше;
- * @param scene слой Pixi — нужен только кнопке подписей объектов
- *              (setObjectLabels; по умолчанию подписи ВЫКЛ).
+ * @param scene слой Pixi — нужен только кнопке РАЗМЕТКИ сцены
+ *              (setObjectLabels: рамки/обводки областей текстур + подписи;
+ *              по умолчанию ВЫКЛ — в игре только реальные текстуры).
  */
 export function setupDebugPanel(game: Game, scene: GameView): void {
   if (document.getElementById(PANEL_ID)) return;
@@ -130,6 +132,28 @@ export function setupDebugPanel(game: Game, scene: GameView): void {
   undoBtn.disabled = true;
   refreshUndoButton();
 
+  // ПОКУПКИ ИЗ ИГРЫ (карточки выноски) — каждая ОТДЕЛЬНЫМ шагом отмены
+  // (запрос владельца 2026-10-05: «кнопка отмена могла отменять покупки в игре,
+  // и они считались как отдельное действие»). Ядро шлёт событие ПОСЛЕ списания
+  // с прошлым уровнем и суммой — панель складывает откат в тот же LIFO-стек,
+  // что и свои действия: «↩» снимает ПОСЛЕДНЕЕ по одному (покупка или своё).
+  // Откат: уровни — applyLevels по ОДНОМУ объекту (снимок остальных берём
+  // текущий — по LIFO более поздние действия уже откатили), деньги — возврат
+  // ровно списанной суммы (доход с момента покупки не трогаем).
+  events.on('object:purchased', ({ def, prevLevel, cost }) => {
+    const count = def.currentLevel - prevLevel;
+    pushUndo(`покупка: ${def.name}`, () => {
+      const levels: Record<string, number> = {};
+      for (const o of objectDefs) levels[o.id] = o.currentLevel;
+      levels[def.id] = prevLevel;
+      game.state.applyLevels(levels);
+      game.state.money = game.state.money.add(cost);
+      game.refreshAfterDebug();
+      log(`Откат покупки: ${def.name} → ур. ${prevLevel}, +${formatNumber(cost)}$`, 'ok');
+    });
+    log(`Покупка: ${def.name} +${count} ур. −${formatNumber(cost)}$ (отменяемо)`, 'ok');
+  });
+
   // ============ +1 lvl (полная ширина) ============
   const lvlAllBtn = mkBtn('+1 lvl всем', () => {
     const before: Record<string, number> = {};
@@ -162,19 +186,22 @@ export function setupDebugPanel(game: Game, scene: GameView): void {
   game.setTimeScale(1);
   refreshSpeedHighlight(1);
 
-  // ============ Подписи объектов: «номер · имя · размер» ============
-  // ТЗ владельца 2026-10-02 (корректура): ВЫКЛ по умолчанию — подписи НЕ видны
-  // нигде (даже на заглушках). ВКЛ — подписи ВСЕХ объектов + метка фона
-  // (сверять габариты рисунка с боксом сцены).
+  // ============ Разметка сцены: области текстур + «номер · имя · размер» ============
+  // ТЗ владельца 2026-10-05: ВЫКЛ по умолчанию — на сцене ТОЛЬКО реальные
+  // текстуры, ни одного прямоугольника-помощника (даже там, где текстуры нет).
+  // ВКЛ — область под текстуру видна у КАЖДОГО объекта: обводка поверх картинки
+  // (даже у прокачанного), КОНТУР там, где текстуры нет (без заливки — ТЗ
+  // владельца 2026-10-05: «объекты обводились по контуру, как на улице»),
+  // плюс подписи и рамка фона — сверять габариты рисунка с боксом сцены.
   let labelsOn = false;
   const labelsBtn = mkBtn('Подписи объектов: ВЫКЛ', () => {
     labelsOn = !labelsOn;
     scene.setObjectLabels(labelsOn);
     labelsBtn.textContent = `Подписи объектов: ${labelsOn ? 'ВКЛ' : 'ВЫКЛ'}`;
     labelsBtn.classList.toggle('active-forced', labelsOn);
-    log(`Подписи объектов: ${labelsOn ? 'ВКЛ — у всех объектов' : 'ВЫКЛ — подписи скрыты'}`);
+    log(`Разметка сцены: ${labelsOn ? 'ВКЛ — области текстур + подписи у всех' : 'ВЫКЛ — только реальные текстуры'}`);
   });
-  labelsBtn.title = 'Показать/скрыть подписи «номер · имя · размер» у всех объектов сцены';
+  labelsBtn.title = 'Разметка сцены: обводка области текстуры + подписи «номер · имя · размер» у всех объектов';
 
   // ============ Сброс (полная ширина) ============
   let resetArmed = false;
