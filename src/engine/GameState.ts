@@ -1,6 +1,7 @@
 import Decimal from 'break_infinity.js';
 import { gameConfig } from '@data/gameConfig';
 import { LOCATIONS, getLocation } from '@data/locations';
+import type { SceneKind } from '@data/assets';
 import { objectById, objectDefs } from '@data/objects';
 import { events } from './eventBus';
 import type { BuyMode, GameStateSnapshot, ObjectDef, OfflineEarnings, SubscriberState } from './types';
@@ -33,6 +34,14 @@ export class GameState {
    */
   location: number;
 
+  /**
+   * Текущая СЦЕНА (Дом/Улица, см. data/assets.ts SceneKind). Сессионная:
+   * в сейв НЕ пишется (старт всегда с улицы) — инвариант сцен сохранён.
+   * Меняет МЕСТО объектов и даёт бонус ровно одному из потоков дохода:
+   * home — +15% пассива, street — +15% тапа (см. gameConfig.sceneBonus).
+   */
+  scene: SceneKind;
+
   /** Кэш активного потока (доход за тап): пересобирается после изменения уровней. */
   private cachedMoneyPerTap: Decimal | null = null;
   /**
@@ -48,6 +57,7 @@ export class GameState {
     this.tapsCount = 0;
     this.subscribers = { count: 0, progress: 0, claimed: 0, claimable: false, goal: 0 };
     this.location = 0;
+    this.scene = 'street'; // сессия всегда начинается с улицы
   }
 
   // -------------------------------------------------------------- objects
@@ -199,6 +209,21 @@ export class GameState {
     return plan.count;
   }
 
+  // ----------------------------------------------------------------- scene
+
+  /**
+   * Смена сцены (Дом ↔ Улица): меняет множители потоков. Сценовый бонус —
+   * РОВНО 15% от итогового потока (после весов/тиров), поэтому он живёт
+   * МНОЖИТЕЛЕМ В КОНЦЕ формулы, а не в весах объектов. Стартовая сцена —
+   * улица (сессия начинается там, сейв сцену не хранит).
+   */
+  setScene(scene: SceneKind): void {
+    if (this.scene === scene) return;
+    this.scene = scene;
+    // Оба потока зависят от сцены — пересчитываем оба кэша.
+    this.invalidateCaches();
+  }
+
   // ------------------------------------------------------- потоки дохода
 
   /**
@@ -235,6 +260,10 @@ export class GameState {
         }
       }
       cached = gameConfig.moneyPerTap.mul(1 + sum);
+      if (this.scene === 'street') {
+        // Бонус улицы: тап ×1.15 (пассив остаётся стандартным).
+        cached = cached.mul(1 + gameConfig.sceneBonus.tapBonus);
+      }
       this.cachedMoneyPerTap = cached;
     }
     return cached;
@@ -252,6 +281,10 @@ export class GameState {
       }
     }
     this.passiveIncomePerSecond = gameConfig.passiveBase.mul(1 + sum);
+    if (this.scene === 'home') {
+      // Бонус дома: пассив ×1.15 (тап остаётся стандартным).
+      this.passiveIncomePerSecond = this.passiveIncomePerSecond.mul(1 + gameConfig.sceneBonus.passiveBonus);
+    }
   }
 
   /** Начислить пассивный доход за dt секунд. Вызывается из GameLoop. */

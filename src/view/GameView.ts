@@ -13,6 +13,7 @@ import { SCENE_GROUPS, SCENE_ORDER, assetGroupOf, assetKey, backgroundGroup } fr
 import type { AssetGroup, SceneKind } from '@data/assets';
 import { WorldLayer, WORLD_REF_H, WORLD_REF_W } from './WorldLayer';
 import type { AssetRegistry } from './assetRegistry';
+import { GlowEffect } from './GlowEffect';
 
 interface FloatText {
   node: Text;
@@ -104,6 +105,12 @@ interface RectSpec {
   num: string;
   label: string;
   lift?: number;
+  /**
+   * Свечение эволюции на объект НЕ играет. Тело игрока: его стадия — скин текущей
+   * ЛОКАЦИИ (applySceneBackground), а не уровень, поэтому смены текстуры у него
+   * не «эволюции» (см. syncVisual).
+   */
+  noGlow?: true;
 }
 
 /**
@@ -118,6 +125,8 @@ interface RectSpec {
  */
 interface RectVisual {
   spec: RectSpec;
+  /** Контейнер узла: нужен свечению (его корень — ребёнок узла) и раскладке. */
+  node: Container;
   gfx: Graphics;
   /** Обводка области текстуры — видна только в режиме разметки (поверх спрайта). */
   outline: Graphics;
@@ -125,6 +134,15 @@ interface RectVisual {
   sprite: Sprite;
   stage: number;
   appliedKey: string | null;
+  /** Свечение силуэта: создаётся лениво — только у объекта, пережившего смену стадии. */
+  glow: GlowEffect | null;
+  /**
+   * Смена стадии пришла у СКРЫТОГО объекта (чужая сцена, показ сцены на старте) —
+   * применить без свечения: эволюция произошла «за кадром» (решение владельца 2026-10-05).
+   */
+  silentSwap: boolean;
+  /** Объект показывается ВПЕРВЫЕ (уровень 0→1) — смена стадии играет свечение (ТЗ владельца). */
+  firstReveal: boolean;
 }
 
 /**
@@ -145,7 +163,7 @@ const sceneBox = (group: AssetGroup): { w: number; h: number } => ({
 const YARD_SPEC: RectSpec = { id: 'bg', group: 'yard', ...sceneBox('yard'), color: 0xff00aa, num: '6', label: 'ДВОР' };
 const HOUSE_SPEC: RectSpec = { id: 'house', group: 'house', ...sceneBox('house'), color: 0x00a844, num: '4', label: 'ДОМ' };
 const CAR_SPEC: RectSpec = { id: 'car', group: 'car', ...sceneBox('car'), color: 0xe01010, num: '2', label: 'МАШИНА' };
-const CHAR_SPEC: RectSpec = { id: 'character' as ObjectId, group: 'character', ...sceneBox('character'), color: 0xe01010, num: '1', label: 'ИГРОК' };
+const CHAR_SPEC: RectSpec = { id: 'character' as ObjectId, group: 'character', ...sceneBox('character'), color: 0xe01010, num: '1', label: 'ИГРОК', noGlow: true };
 /**
  * Рабочее место: ТРИ КОНГРУЭНТНЫХ слоя в ОДНОЙ точке, ОДНА геометрия на всех
  * (владелец 2026-09-30: «все объекты должны быть одинаковых размеров») — бокс
@@ -330,6 +348,12 @@ export class GameView {
   /** Пул текстов «+1$»: без аллокаций на каждый тап. */
   private floatPool: FloatText[] = [];
 
+  /**
+   * Первый applySceneState (показ сцены на старте в main) — ТИХИЙ: сцена
+   * одевается уже прокачанными объектами и не светится при загрузке игры.
+   */
+  private sceneStateReady = false;
+
   constructor(
     host: HTMLElement,
     /** Рантайм-загрузчик текстур: создаётся в main (см. ASSETS.md). */
@@ -458,7 +482,19 @@ export class GameView {
     // Видимость — строго по режиму разметки (по умолчанию ВЫКЛ).
     mark.visible = this.labelsForced;
     c.addChild(mark);
-    this.visuals.set(c, { spec, gfx: g, outline, label: mark, sprite, stage: -1, appliedKey: null });
+    this.visuals.set(c, {
+      spec,
+      node: c,
+      gfx: g,
+      outline,
+      label: mark,
+      sprite,
+      stage: -1,
+      appliedKey: null,
+      glow: null,
+      silentSwap: false,
+      firstReveal: false,
+    });
 
     return c;
   }
@@ -857,12 +893,24 @@ export class GameView {
     if (this.lastLocation >= 0) this.applySceneBackground(this.lastLocation);
   }
 
-  /** Запомнить запрошенную стадию узла и сразу попробовать подменить текстуру. */
-  private setStage(container: Container | null, stage: number): void {
+  /**
+   * Запомнить запрошенную стадию узла и сразу попробовать подменить текстуру.
+   * silent — ПОКАЗ СЦЕНЫ НА СТАРТЕ (bootstrap в main): свечение не играет.
+   * Смена стадии у СКРЫТОГО узла (чужая сцена) тоже пройдёт без свечения — эволюция
+   * случилась «за кадром», объект покажется уже новой стадией (решение №31).
+   * Первый показ объекта (уровень 0→1) — наоборот, вспышка свечения по силуэту.
+   */
+  private setStage(container: Container | null, stage: number, silent = false): void {
     if (!container) return;
     const rec = this.visuals.get(container);
     if (!rec) return;
+
+    const first = rec.stage < 0;
+    const changed = rec.stage !== stage;
     rec.stage = stage;
+    if (silent || (changed && !container.visible)) rec.silentSwap = true;
+    else if (first) rec.firstReveal = true;
+
     if (container.visible) this.syncVisual(rec);
   }
 
@@ -871,6 +919,13 @@ export class GameView {
    * стадии N — берётся ближайшая младшая). Ассета нет вовсе — текстуры нет
    * (в обычной игре узел просто пустой). Ассет есть, но ещё грузится — ничего
    * не трогаем: по завершении onLoaded позовёт refreshTextures.
+   *
+   * СМЕНА СТАДИИ — через СВЕЧЕНИЕ СИЛУЭТА (ТЗ владельца 2026-10-06, решение 31):
+   * текстура меняется СРАЗУ (main-спрайт несёт новую стадию), а подмена не «щёлкает»
+   * за счёт КРОСС-ФЕЙДА — уходящую текстуру держит ghost-спрайт эффекта и гаснет под
+   * свечением. Пока эффект играет, новая смена стадии лишь МЕНЯЕТ ЦЕЛЬ (показ самой
+   * свежей стадии) — эффект не перезапускается. Без свечения проходят: тело игрока
+   * (скин по локации), показ сцены на старте и смены у скрытых объектов (чужая сцена).
    */
   private syncVisual(rec: RectVisual): void {
     if (rec.stage < 0) return; // стадия ещё не задана состоянием сцены
@@ -895,13 +950,52 @@ export class GameView {
     // спрайт остался бы с уничтоженной текстурой (чёрный/пустой кадр).
     if (rec.appliedKey === key && rec.sprite.texture === texture) return;
 
+    // Уходящая текстура для кросс-фейда — то, что реально показано сейчас (null — объекта не было).
+    const previous = rec.appliedKey !== null ? rec.sprite.texture : null;
+    this.applyTexture(rec, key, texture);
+
+    // Свечение — только эволюциям и первому появлению (0→1) В КАДРЕ: тело игрока
+    // (noGlow), старт игры и чужая сцена (silentSwap) подменяются сразу.
+    const wantGlow =
+      rec.spec.noGlow !== true && !rec.silentSwap && (previous !== null || rec.firstReveal);
+    rec.silentSwap = false;
+    rec.firstReveal = false;
+    if (!wantGlow) return;
+
+    // Эффект уже играет — это серия эволюций: НЕ перезапускаем, показываем свежую стадию
+    // (владелец 2026-10-05/06: «доиграть текущий, показать самую свежую стадию»).
+    if (rec.glow?.active) {
+      rec.glow.retarget(texture);
+      return;
+    }
+
+    const glow = rec.glow ?? (rec.glow = this.createGlow(rec));
+    glow.start(texture, previous);
+  }
+
+  /**
+   * Поставить текстуру на спрайт узла. Размер ставится КАЖДЫЙ раз: у текстур
+   * разного разрешения своя натуральная величина, width/height нормируют её в
+   * истинный бокс сцены.
+   */
+  private applyTexture(rec: RectVisual, key: string, texture: Texture): void {
     rec.sprite.texture = texture;
-    // Размер спрайта ставится КАЖДЫЙ раз: у текстур разного разрешения своя
-    // натуральная величина, width/height нормируют её в истинный бокс сцены.
     rec.sprite.width = rec.spec.w;
     rec.sprite.height = rec.spec.h;
     rec.appliedKey = key;
     this.syncVisualVisibility(rec);
+  }
+
+  /**
+   * Ленивое создание свечения у объекта: корень эффекта — РЕБЁНОК узла, эффект
+   * наследует позицию и зум сцены и живёт ровно над своим объектом, ничего не зная
+   * о раскладке. Шейдер один на всех, но uniforms и фильтр у каждого свои — объекты
+   * светятся независимо друг от друга.
+   */
+  private createGlow(rec: RectVisual): GlowEffect {
+    const glow = new GlowEffect(rec.spec.w, rec.spec.h);
+    rec.node.addChild(glow.root);
+    return glow;
   }
 
   /**
@@ -954,23 +1048,26 @@ export class GameView {
    */
   applySceneState(states: SceneObjectInfo[]): void {
     this.lastStates = states;
+    // Первый вызов — показ сцены на старте: молча, без свечения на загрузке игры.
+    const silent = !this.sceneStateReady;
+    this.sceneStateReady = true;
 
     for (const s of states) {
       switch (s.id) {
         case 'house':
           // Дом не покупается (startLevel 1) — видимость не трогаем, только стадию.
-          this.setStage(this.house, s.tier);
+          this.setStage(this.house, s.tier, silent);
           break;
         case 'car':
           if (this.car) {
             this.car.visible = s.owned;
-            if (s.owned) this.setStage(this.car, s.tier);
+            if (s.owned) this.setStage(this.car, s.tier, silent);
           }
           break;
         case 'bg':
           if (this.yard) {
             this.yard.visible = s.owned;
-            if (s.owned) this.setStage(this.yard, s.tier);
+            if (s.owned) this.setStage(this.yard, s.tier, silent);
           }
           break;
         // Рабочее место живёт в ДОМАШНЕЙ сцене: на улице узлы скрыты целиком
@@ -981,7 +1078,7 @@ export class GameView {
           const found = this.sceneNode(s.id);
           if (found) {
             found.node.visible = s.owned && found.inScene;
-            if (s.owned) this.setStage(found.node, s.tier);
+            if (s.owned) this.setStage(found.node, s.tier, silent);
           }
           break;
         }
@@ -991,7 +1088,7 @@ export class GameView {
           const worn = this.worn.get(s.id);
           if (worn) {
             worn.visible = s.owned;
-            if (s.owned) this.setStage(worn, s.tier);
+            if (s.owned) this.setStage(worn, s.tier, silent);
           }
           break;
         }
@@ -1052,6 +1149,11 @@ export class GameView {
       const u = Math.min(1, this.punchT / PUNCH_TIME);
       const bump = 0.5 - 0.5 * Math.cos(2 * Math.PI * u);
       this.character.scale.set(this.charBaseScale * (1 + PUNCH_AMP * bump));
+    }
+
+    // Свечение эволюции: активные эффекты тикают вместе со сценой.
+    for (const rec of this.visuals.values()) {
+      if (rec.glow) rec.glow.update(dt);
     }
 
     // Обновление всплывающих текстов.
