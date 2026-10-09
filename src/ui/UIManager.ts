@@ -208,6 +208,10 @@ export class UIManager {
       events.on('object:levelup', () => this.forceHud()),
       events.on('subscribers:changed', () => this.renderSubscribers()),
       events.on('subscribers:ready', () => this.renderSubscribers()),
+      // Смена сцены (Дом ↔ Улица): сменился бонус потока (+15% пассива дома /
+      // +15% тапа улицы) — HUD-плашки перерисовываем принудительно, по ключам
+      // строки могут совпасть, если игрок ещё ничего не накачал.
+      events.on('scene:changed', () => this.forceHud()),
       // Переход на другую локацию: кольцо вспыхивает (попап обновит себя сам),
       // подпись локации и шкала пересчитываются под новую полосу уровней.
       events.on('location:changed', () => {

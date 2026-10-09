@@ -170,6 +170,26 @@ export function setupDebugPanel(game: Game, scene: GameView): void {
     });
   });
 
+  // ============ +30 lvl всем (полная ширина) ============
+  // Проверка ЭВОЛЮЦИИ (смена стадии каждые 30 уровней): объекты перепрыгивают
+  // тир, сцена играет свечение силуэта и подменяет текстуры (см. view/GlowEffect.ts).
+  // Действие отменяемое — тем же LIFO-стеком, как «+1 lvl всем».
+  const lvlTierBtn = mkBtn('+30 lvl всем', () => {
+    const before: Record<string, number> = {};
+    for (const o of objectDefs) before[o.id] = o.currentLevel;
+    const levels: Record<string, number> = {};
+    for (const o of objectDefs) {
+      levels[o.id] = Math.min(o.maxLevel, o.currentLevel + 30);
+    }
+    game.state.applyLevels(levels);
+    log('Всем объектам +30 уровней — эволюция со свечением', 'ok');
+    pushUndo('+30 lvl всем', () => {
+      game.state.applyLevels(before);
+      log('Откат: уровни восстановлены');
+    });
+  });
+  lvlTierBtn.title = 'Всем объектам +30 уровней: смена стадии и свечение силуэта';
+
   // ============ Скорость (x1 выбрана по умолчанию) ============
   const speedRow = document.createElement('div');
   speedRow.className = 'row';
@@ -251,6 +271,7 @@ export function setupDebugPanel(game: Game, scene: GameView): void {
     tapRow,
     undoBtn,
     lvlAllBtn,
+    lvlTierBtn,
     speedRow,
     labelsBtn,
     resetBtn,

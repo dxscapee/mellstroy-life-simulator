@@ -1,5 +1,6 @@
 import { gameConfig } from '@data/gameConfig';
 import { objectById } from '@data/objects';
+import type { SceneKind } from '@data/assets';
 import type Decimal from 'break_infinity.js';
 import { events } from './eventBus';
 import { GameState } from './GameState';
@@ -160,6 +161,20 @@ export class Game {
     if (!this.state.advanceLocation()) return false;
     events.emit('location:changed', { location: this.state.location });
     this.saveNow();
+    return true;
+  }
+
+  // ----------------------------------------------------------------- scene
+
+  /**
+   * Смена сцены (Дом ↔ Улица): модель меняет бонус потока (home — +15%
+   * пассива, street — +15% тапа) и эмитится событие для HUD/сцены. false — сцена
+   * уже была такой (переключения не было).
+   */
+  setScene(scene: SceneKind): boolean {
+    if (this.state.scene === scene) return false;
+    this.state.setScene(scene);
+    events.emit('scene:changed', { scene });
     return true;
   }
 

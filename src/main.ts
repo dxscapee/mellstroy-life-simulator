@@ -108,7 +108,9 @@ async function bootstrap(): Promise<void> {
     () => view.scene,
     (scene: SceneKind) => {
       view.setScene(scene);
-      events.emit('scene:changed', { scene });
+      // Ядро: бонус потока (дом +15% пассива / улица +15% тапа) + событие
+      // 'scene:changed' — HUD и кнопка перечитываются (эмитит Game.setScene).
+      game!.setScene(scene);
     },
   );
 
