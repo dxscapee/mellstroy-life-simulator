@@ -229,6 +229,30 @@ export function tierOf(def: ObjectDef): number {
   return Math.max(0, Math.min(raw, def.tierNames.length - 1));
 }
 
+/**
+ * СТАДИЯ ОБЪЕКТА ДЛЯ ПРЕВЬЮ ЛОКАЦИИ (попап «Локации», 2026-10-17, запрос владельца:
+ * «если локация уже пройдена — последняя прокачка с той локи; если игрок сейчас
+ * на ней и не вкачал — то, что у него есть сейчас; не дошёл — ничего не видно»).
+ *
+ *  · ПРОЙДЕННАЯ (viewed < current): последняя ступень той локации — игрок уходил
+ *    с неё только добив ВСЁ до капа, поэтому это её финальный вид;
+ *  · ТЕКУЩАЯ (viewed === current): текущий тир объекта; уровня 0 нет — null
+ *    (не куплено — слоя на превью нет);
+ *  · БУДУЩАЯ (viewed > current): null — страница показывает только «?».
+ * Возвращается ТИР (его режет по числу стадий resolveKey), а не индекс текстуры.
+ */
+export function previewTierOf(
+  def: ObjectDef,
+  viewedLocation: number,
+  currentLocation: number,
+): number | null {
+  if (viewedLocation > currentLocation) return null;
+  if (viewedLocation < currentLocation) {
+    return (viewedLocation + 1) * gameConfig.locations.stages - 1;
+  }
+  return def.currentLevel > 0 ? tierOf(def) : null;
+}
+
 /** Визуальное состояние сценовых объектов (читает GameView). */
 export interface SceneObjectInfo {
   id: ObjectId;

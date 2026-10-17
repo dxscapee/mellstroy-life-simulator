@@ -7,11 +7,15 @@ import type { Game } from '@engine/Game';
  * ОКНО ПО ЦЕНТРУ ЭКРАНА (ТЗ владельца 2026-10-02). ОДНА СТРАНИЦА = ОДНА
  * ЛОКАЦИЯ (Гомель … Кипр), листается стрелками и точками-индикатором.
  *
- * Превью страницы:
- *   · прошлые и текущая локация — её ФОН из манифеста (world/<index>):
- *     картинка или видео (видео живёт ОДНО — только на активной странице);
- *     ассета нет — заглушка «фон ещё не нарисован»;
- *   · будущие локации — только «?»: содержимое не показываем.
+ * Превью страницы (2026-10-17): фон локации + СЦЕНОВЫЕ ОБЪЕКТЫ поверх него
+ * (дом, машина), по правилу стадий из data/objects.previewTierOf:
+ *   · пройденная локация — её финальный вид (последняя ступень той локации);
+ *   · текущая — как у игрока сейчас (не куплено — слоя нет);
+ *   · будущая — только «?»: содержимое не показываем.
+ * Фон — картинка или видео (видео живёт ОДНО — только на активной странице);
+ * ассета нет — заглушка «фон ещё не нарисован». Геометрию слоёв даёт main
+ * (из GameView.streetPreviewBoxes) в номинальном кадре фона, попап только
+ * раскладывает проценты — ui о раскладке сцены ничего не знает.
  *
  * Нижняя строка — по ПРОСМАТРИВАЕМОЙ странице: имя + статус:
  *   · пройдена — «Пройдено» и ✓;
@@ -26,10 +30,27 @@ import type { Game } from '@engine/Game';
  * (тот же инвариант, что у модалки офлайна: скрытая не ловит тапы).
  */
 
-/** Что даёт провайдер превью: URL фона локации и его формат. */
+/** Слой превью поверх фона (дом/машина): URL и прямоугольник в КАДРЕ фона. */
+export interface LocationPreviewLayer {
+  /** Ключ ассета (диагностика/подпись). */
+  key: string;
+  url: string;
+  kind: 'image' | 'video';
+  /** Левый верхний угол в px кадра frame.w×frame.h. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Что даёт провайдер превью: фон локации + сценовые объекты на её стадиях. */
 export interface LocationPreviewSource {
   url: string;
   kind: 'image' | 'video';
+  /** Номинальный кадр превью — в нём заданы прямоугольники слоёв (px). */
+  frame: { w: number; h: number };
+  /** Слои ПОВЕРХ фона в порядке отрисовки (пустой массив — только фон). */
+  layers: LocationPreviewLayer[];
 }
 
 /**
@@ -51,6 +72,12 @@ export class LocationPopup {
   /** Медиа-слоты страниц (по индексу локации). */
   private pages: HTMLElement[] = [];
   private mediaState: MediaState[] = [];
+  /**
+   * Сигнатура построенного превью каждой страницы: набор URL (фон + слои).
+   * По ней refresh перестраивает страницу, когда прокачка сменила стадии
+   * (или локация стала будущей ↔ открытой), и НЕ трогает DOM зря.
+   */
+  private lastSig: string[] = [];
   private dots: HTMLButtonElement[] = [];
   private prevBtn: HTMLButtonElement;
   private nextBtn: HTMLButtonElement;
@@ -116,6 +143,7 @@ export class LocationPopup {
       this.track.appendChild(page);
       this.pages.push(page);
       this.mediaState.push('unbuilt');
+      this.lastSig.push('');
     }
 
     viewport.append(this.prevBtn, this.track, this.nextBtn);
@@ -208,7 +236,8 @@ export class LocationPopup {
     this.track.style.transform = `translateX(${(-idx * 100) / this.pages.length}%)`;
     // Уходя со страницы, закрываем её видео-декодер (больше одного не держим).
     if (prev !== idx) this.releaseMedia(prev);
-    if (this.mediaState[idx] === 'unbuilt') this.buildMedia(idx);
+    // Строим всегда: внутри — проверка сигнатуры (цена, если ничего не менялось).
+    this.buildMedia(idx);
     this.refresh(true);
   }
 
@@ -220,14 +249,24 @@ export class LocationPopup {
     const pct = Math.floor(this.game.state.locationProgress() * 100);
 
     // Смена локации: у страниц меняется статус «будущая ↔ открыта» —
-    // такие слоты перестраиваем («?» ↔ фон локации).
+    // такие слоты перестраиваем («?» ↔ фон локации). Плюс прошлая текущая
+    // страница становится ПРОЙДЕННОЙ: её превью должно смениться с «как сейчас»
+    // на финальный вид той локации, поэтому при смене локации перестраиваем все
+    // открытые страницы (сигнатура не даст тронуть DOM зря).
+    const locationChanged = location !== this.lastLocation;
     for (let i = 0; i < this.pages.length; i++) {
       const state = this.mediaState[i];
       const future = i > location;
-      if ((future && state !== 'future' && state !== 'unbuilt') || (!future && state === 'future')) {
+      if (
+        locationChanged ||
+        (future && state !== 'future' && state !== 'unbuilt') ||
+        (!future && state === 'future')
+      ) {
         this.buildMedia(i);
       }
     }
+    // Просматриваемая страница: прокачка могла сменить стадии дома/машины.
+    this.buildMedia(this.index);
 
     if (!force && this.index === this.lastIndex && location === this.lastLocation && pct === this.lastPct) {
       return;
@@ -323,16 +362,26 @@ export class LocationPopup {
   }
 
   /**
-   * Построить превью страницы: «?» для будущей локации, её фон (картинка или
-   * видео) для открытой, заглушка — если ассета нет.
+   * Построить превью страницы: «?» для будущей локации, КАДР сцены (фон + слои
+   * объектов) для открытой, заглушка — если ассета фона нет. Зовётся на выбор
+   * страницы и из refresh: если сигнатура (фон + URL слоёв) не поменялась,
+   * DOM не трогается вообще — тик не должен перерисовывать карусель зря.
    */
   private buildMedia(location: number): void {
+    const future = location > this.game.state.location;
+    const src = future ? null : this.preview?.(location) ?? null;
+    const sig = future ? 'future' : src ? previewSig(src) : 'empty';
+
+    if (this.lastSig[location] === sig && this.mediaState[location] !== 'unbuilt') return;
+    this.lastSig[location] = sig;
+
+    // Прошлый контент страницы: видео — закрыть декодер, DOM — очистить.
+    this.releaseMedia(location);
     const slot = this.pages[location];
     slot.textContent = '';
-    this.mediaState[location] = 'placeholder';
 
     // Будущая локация: содержимое не показываем — только «?».
-    if (location > this.game.state.location) {
+    if (future) {
       const unknown = document.createElement('div');
       unknown.className = 'loc-media-unknown';
       unknown.textContent = '?';
@@ -341,7 +390,6 @@ export class LocationPopup {
       return;
     }
 
-    const src = this.preview?.(location) ?? null;
     if (!src) {
       // Ассета фона локации ещё нет — страница не пустует: иконка + подпись.
       const empty = document.createElement('div');
@@ -354,45 +402,75 @@ export class LocationPopup {
       text.textContent = 'Фон локации ещё не нарисован';
       empty.append(icon, text);
       slot.appendChild(empty);
+      this.mediaState[location] = 'placeholder';
       return;
     }
 
-    if (src.kind === 'image') {
+    // Пропорция кадра — от провайдера (номинал фона); по ней же живут «?» и
+    // заглушка, иначе страницы карусели прыгали бы по высоте.
+    this.pop.style.setProperty('--loc-frame-ar', `${src.frame.w} / ${src.frame.h}`);
+
+    const name = LOCATIONS[location]?.name ?? '';
+    const stage = document.createElement('div');
+    stage.className = 'loc-stage';
+
+    // Фон закрывает кадр целиком (как в игре), слои — в % от кадра: попап
+    // не знает ни пикселей сцены, ни её раскладки — всё пришло от main.
+    stage.appendChild(this.mkMedia(src.kind, src.url, 'loc-media', `Фон локации «${name}»`));
+    for (const layer of src.layers) {
+      const el = this.mkMedia(layer.kind, layer.url, 'loc-layer', '');
+      el.style.left = `${(layer.x / src.frame.w) * 100}%`;
+      el.style.top = `${(layer.y / src.frame.h) * 100}%`;
+      el.style.width = `${(layer.width / src.frame.w) * 100}%`;
+      el.style.height = `${(layer.height / src.frame.h) * 100}%`;
+      stage.appendChild(el);
+    }
+    slot.appendChild(stage);
+
+    // Видео (фон или слой) — держим 1–2 живых декодера (см. ASSETS.md):
+    // состояние 'video' означает, что при уходе со страницы их надо закрыть.
+    const hasVideo = src.kind === 'video' || src.layers.some((l) => l.kind === 'video');
+    this.mediaState[location] = hasVideo ? 'video' : 'image';
+  }
+
+  /** Элемент превью: картинка или видео (видео — muted/loop/playsinline). */
+  private mkMedia(
+    kind: 'image' | 'video',
+    url: string,
+    className: string,
+    alt: string,
+  ): HTMLElement {
+    if (kind === 'image') {
       const img = document.createElement('img');
-      img.className = 'loc-media';
-      img.src = src.url;
-      img.alt = `Фон локации «${LOCATIONS[location].name}»`;
+      img.className = className;
+      img.src = url;
+      img.alt = alt;
       img.draggable = false;
-      slot.appendChild(img);
-      this.mediaState[location] = 'image';
-      return;
+      return img;
     }
 
-    // Видео: ОДИН живой декодер — только на просматриваемой странице
-    // (muted/playsinline/loop без контролов, как требует Яндекс).
     const video = document.createElement('video');
-    video.className = 'loc-media';
+    video.className = className;
     video.muted = true;
     video.loop = true;
     video.playsInline = true;
     video.controls = false;
     video.preload = 'auto';
     video.setAttribute('playsinline', '');
-    video.setAttribute('aria-label', `Фон локации «${LOCATIONS[location].name}»`);
-    video.src = src.url;
-    slot.appendChild(video);
+    if (alt) video.setAttribute('aria-label', alt);
+    video.src = url;
     void video.play().catch(() => {});
-    this.mediaState[location] = 'video';
+    return video;
   }
 
   /**
-   * Освободить слот уходящей страницы: видео закрываем (декодеров держим
-   * 1–2, см. ASSETS.md), картинку оставляем — она бесплатна и вернётся мгновенно.
+   * Освободить слот уходящей страницы: ВСЕ видео закрываем (декодеров держим
+   * 1–2, см. ASSETS.md), картинки остаются в элементе — вернутся мгновенно.
    */
   private releaseMedia(location: number): void {
     if (this.mediaState[location] !== 'video') return;
-    const video = this.pages[location].querySelector('video');
-    if (video) {
+    const videos = this.pages[location].querySelectorAll('video');
+    for (const video of videos) {
       video.pause();
       video.removeAttribute('src');
       video.load();
@@ -400,4 +478,11 @@ export class LocationPopup {
     }
     this.mediaState[location] = 'unbuilt';
   }
+}
+
+/** Сигнатура превью (фон + URL слоёв): по ней страница решает, перестраиваться ли. */
+function previewSig(src: LocationPreviewSource): string {
+  let sig = `${src.kind}:${src.url}`;
+  for (const layer of src.layers) sig += `|${layer.key}:${layer.kind}:${layer.url}`;
+  return sig;
 }

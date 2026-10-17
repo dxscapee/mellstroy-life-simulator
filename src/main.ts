@@ -4,7 +4,7 @@ import { events } from '@engine/eventBus';
 import { Game } from '@engine/Game';
 import { formatMoney } from '@engine/format';
 import { yandexService } from '@services/yandex';
-import { buildSceneState } from '@data/objects';
+import { buildSceneState, objectById, previewTierOf } from '@data/objects';
 import {
   assetGroupOf,
   assetKey,
@@ -13,9 +13,11 @@ import {
   CHARACTER_ASSET_GROUP,
 } from '@data/assets';
 import type { SceneKind } from '@data/assets';
-import { GameView } from '@view/GameView';
+import { GameView, streetPreviewBoxes } from '@view/GameView';
+import { WORLD_REF_H, WORLD_REF_W } from '@view/WorldLayer';
 import { AssetRegistry } from '@view/assetRegistry';
 import { UIManager } from '@ui/UIManager';
+import type { LocationPreviewLayer } from '@ui/LocationPopup';
 import { BootScreen } from '@ui/BootScreen';
 
 const canvasHost = document.getElementById('canvas-host')!;
@@ -94,14 +96,41 @@ async function bootstrap(): Promise<void> {
   view.applySceneBackground(game.state.location);
   events.on('location:changed', ({ location }) => view.applySceneBackground(location));
 
-  // 4) Слой UI. Превью локаций для попапа: URL фона из манифеста (ui про view не знает).
+  // 4) Слой UI. Превью локаций для попапа: фон улицы + СЦЕНОВЫЕ ОБЪЕКТЫ
+  // (дом, машина) на стадиях той локации. Стадии — правило из данных
+  // (previewTierOf: пройдена — финал той локации, текущая — как сейчас,
+  // будущая — ничего), геометрия — из view (streetPreviewBoxes). ui получает
+  // готовые URL и прямоугольники и о раскладке сцены не знает вообще.
+  const previewBoxes = streetPreviewBoxes();
   const ui = new UIManager(
     uiRoot,
     game,
     (location) => {
-      const key = assetKey(backgroundGroup('street'), location);
-      const entry = assets.has(key) ? assets.entry(key) : null;
-      return entry ? { url: entry.url, kind: entry.type } : null;
+      const bgKey = assetKey(backgroundGroup('street'), location);
+      const bg = assets.has(bgKey) ? assets.entry(bgKey) : null;
+      if (!bg) return null;
+
+      const layers: LocationPreviewLayer[] = [];
+      for (const box of previewBoxes) {
+        const group = assetGroupOf(box.id, 'street');
+        const def = objectById.get(box.id);
+        if (!group || !def) continue;
+        const tier = previewTierOf(def, location, game!.state.location);
+        if (tier === null) continue;
+        const key = assets.resolveKey(group, tier);
+        if (!key) continue;
+        const entry = assets.entry(key);
+        if (!entry) continue;
+        const { x, y, width, height } = box;
+        layers.push({ key, url: entry.url, kind: entry.type, x, y, width, height });
+      }
+
+      return {
+        url: bg.url,
+        kind: bg.type,
+        frame: { w: WORLD_REF_W, h: WORLD_REF_H },
+        layers,
+      };
     },
     // Кнопка сцен: ui читает текущую сцену у view и просит её переключить
     // (направление зависимостей сохраняется — связывает их main).

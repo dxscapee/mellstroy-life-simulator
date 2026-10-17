@@ -5,14 +5,16 @@ import type { SceneKind } from '@data/assets';
 /**
  * ЗАДНИЙ СЛОЙ МИРА — «Фон» (объект 5 на чертеже).
  *
- * СТАТИЧЕСКИЙ: не участвует в дрейфе динамики, но СЛЕДУЕТ за экраном — на
- * каждом ресайзе пересчитывается cover и центр (фикс владельца 2026-09-30).
- * Непропорциональное окно срезает край фона симметрично — это ок.
+ * ФОН ВСЕГДА ЗАКРЫВАЕТ ЭКРАН (владелец 2026-10-17: «сделай так, чтобы фон был
+ * растянут по ширине, чтобы он занял весь экран, а всё остальное — гуд»): при
+ * КАЖДОМ ресайзе scale = max(w/ширина_текстуры, h/высота_текстуры) (cover).
+ * Аспект НЕ искажается: непропорциональное окно срезает края фона симметрично.
+ * ЭТО ОТДЕЛЬНОЕ ПРАВИЛО ФОНА — сценические объекты наоборот ФИКСИРОВАНЫ и при
+ * ресайзе не масштабируются (см. GameView.applySceneSizes).
  *
  * Cover считается по РАЗМЕРУ ТЕКУЩЕЙ ТЕКСТУРЫ, а не по эталону: фон любого
  * соотношения сторон закрывает экран без растяжения (эталон 1120×759 из
- * sceneAssets.json — только номинальный кадр и заглушка; аспект мастера
- * world/0 = 1.475 совпадает с ним).
+ * sceneAssets.json — только номинальный кадр и заглушка).
  *
  * Текстуру ставит GameView.applySceneBackground по манифесту (setTexture(null) —
  * фон снимается). Слою безразлично, картинка это или видео: и то и другое
@@ -79,9 +81,17 @@ export class WorldLayer {
     this.applyVisibility();
   }
 
-  /** Перерисовать служебные рамки фона под текущую сцену (бокс + цвет). */
+  /**
+   * Перерисовать служебные рамки фона под ТЕКУЩИЙ РАЗМЕР КОНТЕНТА (и цвет сцены).
+   * Рамка — РЕАЛЬНАЯ область фона: бокс паспорта без текстуры или НАТУРАЛЬНЫЙ размер
+   * текстуры, поэтому контур ложится ровно по картинке. Раньше обе рамки рисовались
+   * по номинальному боксу 1120×759, а текстуры приходят 2× — в комнате (и на улице)
+   * висел «фантомный» прямоугольник вдвое меньше фона, не привязанный ни к чему
+   * (баг владельца 2026-10-17: «убери хитбокс несуществующего объекта в сцене комнаты»).
+   */
   private drawPlaceholder(): void {
-    const { w, h } = bgBox(this.scene);
+    const w = this.contentW;
+    const h = this.contentH;
     const color = BG_COLOR[this.scene];
 
     this.placeholder.clear();
@@ -118,12 +128,13 @@ export class WorldLayer {
   setScene(scene: SceneKind): void {
     if (this.scene === scene) return;
     this.scene = scene;
-    this.drawPlaceholder();
     if (!this.textured) {
       const box = bgBox(scene);
       this.contentW = box.w;
       this.contentH = box.h;
     }
+    // После смены контента — иначе рамка осталась бы от прежнего размера.
+    this.drawPlaceholder();
     this.layout(this.screenW, this.screenH);
   }
 
@@ -152,18 +163,22 @@ export class WorldLayer {
       this.contentH = box.h;
       this.textured = false;
     }
+    // Рамка = фактическая область контента: под текстурой — её натуральный размер.
+    this.drawPlaceholder();
     this.applyVisibility();
     this.layout(this.screenW, this.screenH);
   }
 
   /**
    * Пересадка фона под ТЕКУЩИЙ экран — зовётся из GameView.layout на каждом
-   * ресайзе: фон всегда ЦЕНТРИРОВАН и всегда ЗАКРЫВАЕТ экран (cover: scale =
-   * max(w/contentW, h/contentH); непропорциональные окна срезают края).
+   * ресайзе: фон ВСЕГДА ЗАКРЫВАЕТ экран (cover: scale = max(w/contentW,
+   * h/contentH)), центр садится на центр экрана, непропорциональные окна
+   * срезают края симметрично (владелец 2026-10-17).
    */
   layout(screenW: number, screenH: number): void {
     this.screenW = screenW;
     this.screenH = screenH;
+    // Cover под ТЕКУЩЕЕ окно: ширина и/или высота — та, что больше по доле.
     const scale = Math.max(screenW / this.contentW, screenH / this.contentH);
     this.holder.scale.set(scale);
     this.holder.x = Math.round(screenW / 2);
