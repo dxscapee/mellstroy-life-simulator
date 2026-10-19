@@ -438,12 +438,35 @@ button.sub-cell {
   min-width: 0;
 }
 
-/* Превью локации: её фон ЦЕЛИКОМ (contain — арт не обрезаем, поля по бокам). */
-.loc-media {
-  display: block;
+/* Сцена превью: фон + сценические объекты (дом/машина) поверх него.
+   Пропорция кадра — от провайдера (номинал фона), fallback — эталон 1120×759.
+   Одна пропорция у ВСЕХ состояний страницы, иначе карусель прыгала бы по высоте. */
+.loc-stage,
+.loc-media-unknown,
+.loc-media-empty {
   width: 100%;
-  height: clamp(170px, 30vh, 300px);
-  object-fit: contain;
+  aspect-ratio: var(--loc-frame-ar, 1120 / 759);
+}
+
+.loc-stage {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Фон закрывает кадр целиком (как в игре: cover, без искажения). */
+.loc-stage > .loc-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Слои объектов: прямоугольники в % кадра; геометрию дал main (сцена). */
+.loc-layer {
+  position: absolute;
+  object-fit: fill;
+  pointer-events: none;
 }
 
 /* Будущая локация: содержимое не показываем — только «?». */
@@ -451,7 +474,6 @@ button.sub-cell {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: clamp(170px, 30vh, 300px);
   font-size: clamp(64px, 15vh, 108px);
   font-weight: 800;
   color: rgba(255, 255, 255, 0.26);
@@ -465,7 +487,6 @@ button.sub-cell {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: clamp(170px, 30vh, 300px);
   color: var(--text-dim);
 }
 
